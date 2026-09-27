@@ -1,82 +1,45 @@
 import Foundation
-import AVFoundation
 import FluidAudio
 
-/// Wraps FluidAudio's offline pyannote-based diarizer.
+/// Wraps FluidAudio's Core ML port of NVIDIA Nemotron 3 Diarization.
 actor DiarizationEngine {
-    private var manager: DiarizerManager?
-    private var models: DiarizerModels?
+    private let config = Nemotron3Config.fast32
+    private var diarizer: Nemotron3Diarizer?
 
     func diarize(wavURL: URL,
                  progress: @escaping (Double, String) -> Void) async throws -> [DiarizedSegment] {
-        progress(0.05, "Loading diarization models")
-        if manager == nil {
-            let models = try await DiarizerModels.downloadIfNeeded()
-            let mgr = DiarizerManager()
-            mgr.initialize(models: models)
-            self.manager = mgr
-            self.models = models
-        }
-        progress(0.3, "Analyzing speakers")
-        let samples = try Self.load16kMonoSamples(from: wavURL)
-        guard let manager else { return [] }
-        let result = try manager.performCompleteDiarization(samples, sampleRate: 16000)
-        return result.segments.map {
-            DiarizedSegment(start: Double($0.startTimeSeconds),
-                            end: Double($0.endTimeSeconds),
-                            speakerId: Self.intSpeakerID(from: $0.speakerId))
-        }
-    }
+        progress(0.05, "Preparing audio")
+        let samples = try AudioConverter().resampleAudioFile(path: wavURL.path)
+        guard !samples.isEmpty else { return [] }
 
-    private static func intSpeakerID(from raw: String) -> Int {
-        // FluidAudio returns strings like "Speaker 1" or "speaker_0" depending on version.
-        let digits = raw.filter { $0.isNumber }
-        return Int(digits) ?? abs(raw.hashValue % 32)
-    }
-
-    private static func load16kMonoSamples(from url: URL) throws -> [Float] {
-        let file = try AVAudioFile(forReading: url)
-        let capacity = AVAudioFrameCount(file.length)
-        guard capacity > 0,
-              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
-                                         frameCapacity: capacity) else { return [] }
-        try file.read(into: buf)
-
-        let frames = Int(buf.frameLength)
-        guard frames > 0 else { return [] }
-        let channelCount = Int(buf.format.channelCount)
-
-        if let channels = buf.floatChannelData {
-            if channelCount == 1 {
-                return Array(UnsafeBufferPointer(start: channels[0], count: frames))
-            }
-            var mono = [Float](repeating: 0, count: frames)
-            for c in 0..<channelCount {
-                let ch = channels[c]
-                for i in 0..<frames { mono[i] += ch[i] }
-            }
-            let scale = 1.0 / Float(channelCount)
-            for i in 0..<frames { mono[i] *= scale }
-            return mono
+        progress(0.15, "Loading Nemotron 3 Diarization")
+        if diarizer == nil {
+            let models = try await Nemotron3Models.loadFromHuggingFace(
+                config: config,
+                progressHandler: { status in
+                    let fraction = min(max(status.fractionCompleted, 0), 1)
+                    progress(0.15 + fraction * 0.20, "Loading Nemotron 3 Diarization")
+                }
+            )
+            diarizer = Nemotron3Diarizer(config: config, models: models)
         }
 
-        let abl = buf.audioBufferList.pointee
-        guard let data = abl.mBuffers.mData else { return [] }
-        let bytes = Int(abl.mBuffers.mDataByteSize)
-        let floatCount = bytes / MemoryLayout<Float>.size
-        let src = data.bindMemory(to: Float.self, capacity: floatCount)
-        if channelCount == 1 {
-            return Array(UnsafeBufferPointer(start: src, count: min(floatCount, frames)))
+        progress(0.35, "Analyzing speakers")
+        guard let diarizer else { return [] }
+        let (probabilities, frameCount) = try diarizer.processComplete(samples)
+        let segments = Nemotron3Diarizer.segments(
+            probabilities: probabilities,
+            frameCount: frameCount,
+            numSpeakers: config.numSpeakers
+        )
+
+        return segments.map {
+            DiarizedSegment(
+                start: Double($0.startSeconds),
+                end: Double($0.endSeconds),
+                speakerId: $0.speakerIndex
+            )
         }
-        var mono = [Float](repeating: 0, count: frames)
-        for i in 0..<frames {
-            var sum: Float = 0
-            for c in 0..<channelCount {
-                sum += src[i * channelCount + c]
-            }
-            mono[i] = sum / Float(channelCount)
-        }
-        return mono
     }
 }
 

@@ -87,6 +87,6 @@ struct MeetingJoinSheet: View {
         .buttonStyle(.glassProminent)
         .controlSize(.extraLarge)
         .tint(.red)
-        .keyboardShortcut(language == .english ? "e" : "p", modifiers: [.command])
+        .keyboardShortcut(language == .english ? "e" : language == .russian ? "r" : "p", modifiers: [.command])
     }
 }

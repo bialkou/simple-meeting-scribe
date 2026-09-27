@@ -39,10 +39,16 @@ packages:
     from: "0.9.0"
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio
-    from: "0.12.0"
+    from: "0.17.4"
   mlx-swift-lm:
     url: https://github.com/ml-explore/mlx-swift-lm
     from: "3.31.4"
+  mlx-swift:
+    url: https://github.com/ml-explore/mlx-swift
+    revision: 901941965d82e4a216d4d117231d847d194c563d
+  GigaAM:
+    url: https://github.com/kruatech/gigaam-v3-mlx
+    revision: 95bd42a4b9a65450a24e1898c7d84b85e0e88509
   swift-transformers:
     url: https://github.com/huggingface/swift-transformers
     from: "1.1.6"
@@ -75,6 +81,8 @@ targets:
         product: MLXHuggingFace
       - package: mlx-swift-lm
         product: MLXVLM
+      - package: GigaAM
+        product: GigaAMKit
       - package: swift-transformers
         product: Tokenizers
       - package: swift-huggingface

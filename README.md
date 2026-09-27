@@ -17,9 +17,11 @@ licensed; fork it, strip it, reshape it — it's yours.
 - Records your microphone **and** the system audio of the meeting as two
   separate tracks (so the transcript can label "You" vs "Remote").
 - Transcribes both tracks with [WhisperKit](https://github.com/argmaxinc/WhisperKit)
-  (Whisper Large v3 / v3 Turbo, CoreML / ANE).
-- Diarizes the remote track with [FluidAudio](https://github.com/FluidInference/FluidAudio)
-  (Pyannote on CoreML) so multiple remote speakers get distinct labels.
+  (Whisper Large v3 / v3 Turbo, CoreML / ANE). Russian audio can use
+  [GigaAM-v3 RNNT](https://github.com/kruatech/gigaam-v3-mlx) through native Swift/MLX.
+- Diarizes meeting audio and imported recordings with NVIDIA's
+  [Nemotron 3 Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization)
+  through [FluidAudio](https://github.com/FluidInference/FluidAudio) on Core ML.
 - Saves `.md` + `.json` transcripts to `~/Documents/MeetingTranscripts/`.
 - Optional on-device LLM summarization + action items + auto-titles via
   [MLX](https://github.com/ml-explore/mlx-swift-lm) — Bielik for Polish,
@@ -34,7 +36,7 @@ licensed; fork it, strip it, reshape it — it's yours.
   optional Azure transcription/summarization uses your own credentials.
 - No auto-update. No App Store listing.
 - No CI or backwards-compatibility promise.
-- Not localised beyond English + Polish (the two languages I need).
+- The interface is in English; transcription supports English, Polish, and Russian.
 
 Local processing happens on your machine. If the network is off, models already
 downloaded keep working. Optional Azure features require a network connection.
@@ -76,6 +78,8 @@ download. Maintainers: see [the release guide](docs/releases.md).
 git clone https://github.com/czlonkowski/simple-meeting-scribe
 cd simple-meeting-scribe
 xcodegen generate
+mkdir -p MeetingTranscriber.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+cp scripts/release/Package.resolved MeetingTranscriber.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 xcodebuild -project MeetingTranscriber.xcodeproj \
            -scheme MeetingTranscriber \
            -configuration Debug \
@@ -164,6 +168,8 @@ Published DMGs use a stable Developer ID signature.
 - `~/Documents/MeetingTranscripts/recordings/` — the paired `.voice.wav`
   and `.system.wav` files for each session.
 - `~/Documents/huggingface/models/` — downloaded LLM weights.
+- GigaAM-v3 RNNT assets use `~/Documents/huggingface/models/kruatech/gigaam-v3-mlx/`
+  and download on first use (~425 MiB).
 - Whisper models live under WhisperKit's own cache (first download shows
   progress inside the app).
 

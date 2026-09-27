@@ -24,6 +24,7 @@ enum SummaryStore {
         switch language {
         case .english: return .gemma4_12b_it_mlx_4bit
         case .polish:  return .gemma4_12b_it_mlx_4bit
+        case .russian: return .gemma4_12b_it_mlx_4bit
         }
     }
 
@@ -31,6 +32,7 @@ enum SummaryStore {
         switch language {
         case .english: return SummaryPrompts.defaultSystemEnglish
         case .polish:  return SummaryPrompts.defaultSystemPolish
+        case .russian: return SummaryPrompts.defaultSystemRussian
         }
     }
 

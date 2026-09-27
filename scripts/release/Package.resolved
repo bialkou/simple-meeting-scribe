@@ -1,13 +1,13 @@
 {
-  "originHash" : "5e6a66f2560d5c71982f8b445014e2658b529860159939473133f88df53007bb",
+  "originHash" : "e75767da000ed65554f788afcbc2fe753016f42dbf80cb29326d9c88d15f9a98",
   "pins" : [
     {
       "identity" : "eventsource",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/mattt/EventSource.git",
+      "location" : "https://github.com/mattt/eventsource.git",
       "state" : {
-        "revision" : "a3a85a85214caf642abaa96ae664e4c772a59f6e",
-        "version" : "1.4.1"
+        "revision" : "86b5096ac59ab46e66bd1f6377c604bc1dab0bc2",
+        "version" : "1.5.1"
       }
     },
     {
@@ -15,8 +15,16 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidInference/FluidAudio",
       "state" : {
-        "revision" : "57551cd90e0bbec342766244358bcf08afb05290",
-        "version" : "0.13.6"
+        "revision" : "21493f8dac5a97e65742e6ff26f42f164c2fda0f",
+        "version" : "0.17.4"
+      }
+    },
+    {
+      "identity" : "gigaam-v3-mlx",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/kruatech/gigaam-v3-mlx",
+      "state" : {
+        "revision" : "95bd42a4b9a65450a24e1898c7d84b85e0e88509"
       }
     },
     {
@@ -24,8 +32,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift",
       "state" : {
-        "revision" : "0bb916c67f4b9e5c682cbe02a42c701c93ab5021",
-        "version" : "0.31.6"
+        "revision" : "901941965d82e4a216d4d117231d847d194c563d"
       }
     },
     {
@@ -40,10 +47,10 @@
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser.git",
+      "location" : "https://github.com/apple/swift-argument-parser",
       "state" : {
-        "revision" : "626b5b7b2f45e1b0b1c6f4a309296d1d21d7311b",
-        "version" : "1.7.1"
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
       }
     },
     {
@@ -51,8 +58,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-asn1.git",
       "state" : {
-        "revision" : "eb50cbd14606a9161cbc5d452f18797c90ef0bab",
-        "version" : "1.7.0"
+        "revision" : "3b6410f7dee09eb33cdd26260c5fd47fda19b0e2",
+        "version" : "1.7.3"
       }
     },
     {
@@ -60,8 +67,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-atomics.git",
       "state" : {
-        "revision" : "b601256eab081c0f92f059e12818ac1d4f178ff7",
-        "version" : "1.3.0"
+        "revision" : "0442cb5a3f98ab802acb777929fdb446bda11a34",
+        "version" : "1.3.1"
       }
     },
     {
@@ -69,8 +76,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
-        "revision" : "6675bc0ff86e61436e615df6fc5174e043e57924",
-        "version" : "1.4.1"
+        "revision" : "a0cb0954ecb21e4e31b0070e6ed5674e8556685a",
+        "version" : "1.6.0"
       }
     },
     {
@@ -78,8 +85,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-crypto.git",
       "state" : {
-        "revision" : "476538ccb827f2dd18efc5de754cc87d77127a47",
-        "version" : "4.4.0"
+        "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
+        "version" : "4.5.2"
       }
     },
     {
@@ -87,8 +94,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-huggingface",
       "state" : {
-        "revision" : "b721959445b617d0bf03910b2b4aced345fd93bf",
-        "version" : "0.9.0"
+        "revision" : "f2f99991f2d7d8fdb3187e4fd539cd2facf5c13d",
+        "version" : "0.11.0"
       }
     },
     {
@@ -96,8 +103,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-jinja.git",
       "state" : {
-        "revision" : "0aeefadec459ce8e11a333769950fb86183aca43",
-        "version" : "2.3.5"
+        "revision" : "4588064a20f3fc093c95f2f7d3359999bf30cae5",
+        "version" : "2.5.1"
       }
     },
     {
@@ -105,8 +112,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-log.git",
       "state" : {
-        "revision" : "5073617dac96330a486245e4c0179cb0a6fd2256",
-        "version" : "1.12.0"
+        "revision" : "9c6fb14227f55d8f711ce3847dc2f419fb0ecacb",
+        "version" : "1.15.1"
       }
     },
     {
@@ -114,8 +121,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "cd6710454f25733900e133c6caf5188952763c36",
-        "version" : "2.98.0"
+        "revision" : "21de5f08c1a166a6dd293d0e587ad977bf8dac5d",
+        "version" : "2.103.0"
       }
     },
     {
@@ -132,8 +139,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/modelcontextprotocol/swift-sdk",
       "state" : {
-        "revision" : "6132fd4b5b4217ce4717c4775e4607f5c3120129",
-        "version" : "0.12.0"
+        "revision" : "a0ae212ebf6eab5f754c3129608bc5557637e605",
+        "version" : "0.12.1"
       }
     },
     {
@@ -150,14 +157,14 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system.git",
       "state" : {
-        "revision" : "7c6ad0fc39d0763e0b699210e4124afd5041c5df",
-        "version" : "1.6.4"
+        "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
+        "version" : "1.8.1"
       }
     },
     {
       "identity" : "swift-transformers",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/huggingface/swift-transformers.git",
+      "location" : "https://github.com/huggingface/swift-transformers",
       "state" : {
         "revision" : "150169bfba0889c229a2ce7494cf8949f18e6906",
         "version" : "1.1.9"

@@ -140,9 +140,11 @@ final class AppState {
     // MARK: – Summarization settings (persisted via SummaryStore)
     var defaultModelEnglish: SummaryModel  = SummaryStore.loadDefaultModel(for: .english)
     var defaultModelPolish:  SummaryModel  = SummaryStore.loadDefaultModel(for: .polish)
+    var defaultModelRussian: SummaryModel  = SummaryStore.loadDefaultModel(for: .russian)
     var azureDeployments: [AzureDeployment] = SummaryStore.loadAzureDeployments()
     var systemPromptEnglish: String        = SummaryStore.loadSystemPrompt(for: .english)
     var systemPromptPolish:  String        = SummaryStore.loadSystemPrompt(for: .polish)
+    var systemPromptRussian: String        = SummaryStore.loadSystemPrompt(for: .russian)
     var downloadedModelIDs:  Set<String>   = SummaryStore.loadDownloadedIDs()
 
     /// User's display name. When non-empty, the `summarize` identification
@@ -159,12 +161,17 @@ final class AppState {
         switch language {
         case .english: defaultModelEnglish = model
         case .polish:  defaultModelPolish = model
+        case .russian: defaultModelRussian = model
         }
         SummaryStore.saveDefaultModel(model, for: language)
     }
 
     func defaultSummaryModel(for language: TranscriptionLanguage) -> SummaryModel {
-        language == .polish ? defaultModelPolish : defaultModelEnglish
+        switch language {
+        case .english: return defaultModelEnglish
+        case .polish:  return defaultModelPolish
+        case .russian: return defaultModelRussian
+        }
     }
 
     /// Menu and picker label of a summary model.
@@ -197,6 +204,7 @@ final class AppState {
         switch language {
         case .english: systemPromptEnglish = text
         case .polish:  systemPromptPolish = text
+        case .russian: systemPromptRussian = text
         }
         SummaryStore.saveSystemPrompt(text, for: language)
     }
@@ -443,7 +451,12 @@ final class AppState {
                 return
             }
         }
-        let basePrompt = language == .polish ? systemPromptPolish : systemPromptEnglish
+        let basePrompt: String
+        switch language {
+        case .english: basePrompt = systemPromptEnglish
+        case .polish:  basePrompt = systemPromptPolish
+        case .russian: basePrompt = systemPromptRussian
+        }
         let glossaryAppendix: String? = useGlossary
             ? SummaryPrompts.glossaryBlock(for: language, terms: glossaryTerms)
             : nil
@@ -1139,7 +1152,7 @@ final class AppState {
 
             let model = job.modelOverride ?? selectedModel
             updateJobStage(jobID, .running(progress: progressOffset + 0.05,
-                                           stage: model.isCloud ? "Preparing upload" : "Loading Whisper"))
+                                           stage: model.loadingStage))
             let pipeline = TranscriptionPipeline()
             let progress: (Double, String) -> Void = { [weak self] p, s in
                 Task { @MainActor in

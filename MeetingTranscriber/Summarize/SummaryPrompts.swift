@@ -15,6 +15,10 @@ enum SummaryPrompts {
         "Jesteś asystentem do notowania spotkań. Bądź zwięzły, rzeczowy i wierny transkrypcji. " +
         "Odpowiadaj w języku transkrypcji. Zachowaj nazwy, terminy techniczne i liczby dokładnie tak, jak się pojawiają."
 
+    static let defaultSystemRussian =
+        "Ты помощник по ведению заметок встреч. Пиши кратко, точно и строго по транскрипции. " +
+        "Отвечай на языке транскрипции. Сохраняй имена, технические термины и числа без изменений."
+
     /// Prompt asking the LLM to map placeholder speaker labels ("Remote",
     /// "Remote 1", …) to real names mentioned in the conversation. Strict
     /// output format so `parseInferredNames` can read it back deterministically.
@@ -29,6 +33,9 @@ enum SummaryPrompts {
         case .polish:
             intro = "Poniżej znajduje się transkrypcja spotkania z zastępczymi etykietami mówców. Dla każdej etykiety podaj prawdziwe imię, tylko jeśli rozmowa jasno to wskazuje (np. ktoś zwraca się po imieniu). Odpowiedz dokładnie jedną linią na etykietę w formacie:"
             unknown = "Jeśli żadne imię nie jest jasno wskazane dla danej etykiety, napisz 'unknown'. Nie wymyślaj imion. Nie dodawaj żadnego komentarza."
+        case .russian:
+            intro = "Ниже транскрипция встречи с условными метками говорящих. Укажи настоящее имя для каждой метки, только если разговор ясно его раскрывает. Ответь ровно одной строкой на каждую метку в формате:"
+            unknown = "Если имя нельзя уверенно определить, напиши 'unknown'. Не выдумывай имена и не добавляй комментарии."
         }
         let format = "<label>: <name or unknown>"
         let bullets = labels.map { "- \($0)" }.joined(separator: "\n")
@@ -68,9 +75,12 @@ enum SummaryPrompts {
                 && !$0.definition.trimmingCharacters(in: .whitespaces).isEmpty
         }
         guard !enabled.isEmpty else { return nil }
-        let header: String = (language == .polish)
-            ? "Słownik pojęć (użyj tych definicji do interpretacji transkrypcji):"
-            : "Glossary of domain terms (use these definitions to interpret the transcript):"
+        let header: String
+        switch language {
+        case .english: header = "Glossary of domain terms (use these definitions to interpret the transcript):"
+        case .polish:  header = "Słownik pojęć (użyj tych definicji do interpretacji transkrypcji):"
+        case .russian: header = "Словарь терминов (используй определения для понимания транскрипции):"
+        }
         let lines = enabled
             .map { "- \($0.term): \($0.definition)" }
             .joined(separator: "\n")
@@ -85,6 +95,8 @@ enum SummaryPrompts {
             return "Write a concise summary of the meeting transcript below in 3–6 sentences. No bullets, no headers — one flowing paragraph."
         case .polish:
             return "Napisz zwięzłe streszczenie poniższej transkrypcji spotkania w 3–6 zdaniach. Bez wypunktowań, bez nagłówków — jeden płynny akapit."
+        case .russian:
+            return "Кратко изложи содержание встречи по транскрипции ниже в 3–6 предложениях. Без списков и заголовков — один связный абзац."
         }
     }
 
@@ -109,6 +121,16 @@ enum SummaryPrompts {
                 • Bez cudzysłowów, bez kropki na końcu, bez wstępu.
                 • Preferuj konkretne rzeczowniki ze spotkania (projekt, temat, decyzja) zamiast ogólników typu "Spotkanie" czy "Rozmowa".
                 • Zwróć tytuł w jednej linii. Nic więcej.
+                """
+        case .russian:
+            return """
+                Придумай краткое название встречи по приведённому ниже резюме.
+
+                Правила:
+                • 3–8 слов.
+                • Без кавычек, точки в конце и вступления.
+                • Используй конкретные темы и решения вместо общих слов.
+                • Выведи название в одну строку, без пояснений.
                 """
         }
     }

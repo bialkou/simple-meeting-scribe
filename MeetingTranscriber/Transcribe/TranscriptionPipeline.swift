@@ -9,6 +9,7 @@ final class TranscriptionPipeline {
     private let diarizer = DiarizationEngine()
     private let scribe = ScribeEngine()
     private let parakeet = ParakeetEngine()
+    private let gigaam = GigaAMEngine()
 
     func run(voiceURL: URL,
              systemURL: URL?,
@@ -136,14 +137,18 @@ final class TranscriptionPipeline {
             var voiceSegs: [WhisperSegment] = []
             var systemSegs: [WhisperSegment] = []
             var systemDiar: [DiarizedSegment] = []
-            if model.isParakeet, let text = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-                Log.pipeline.notice("parakeet has no prompt input; ignoring prime: \(text, privacy: .public)")
+            var voiceDiar: [DiarizedSegment] = []
+            if (model.isParakeet || model.isGigaAM), let text = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                Log.pipeline.notice("selected model has no prompt input; ignoring prime: \(text, privacy: .public)")
             }
             // Local engines share one signature so both stems route the same way.
             func transcribeLocal(_ url: URL,
                                  progress p: @escaping (Double, String) -> Void) async throws -> [WhisperSegment] {
                 if model.isParakeet {
                     return try await parakeet.transcribe(url: url, progress: p)
+                }
+                if model.isGigaAM {
+                    return try await gigaam.transcribe(url: url, progress: p)
                 }
                 return try await whisper.transcribe(url: url,
                                                     language: language,
@@ -163,6 +168,19 @@ final class TranscriptionPipeline {
             } catch {
                 Log.pipeline.error("voice transcription failed — \(String(describing: error), privacy: .public)")
                 throw error
+            }
+
+            if systemURL == nil {
+                progress(0.70, "Diarizing speakers")
+                do {
+                    voiceDiar = try await diarizer.diarize(
+                        wavURL: voiceURL,
+                        progress: { p, s in progress(0.70 + p * 0.15, s) }
+                    )
+                    Log.pipeline.notice("single-track diarizer produced \(voiceDiar.count, privacy: .public) segments")
+                } catch {
+                    Log.pipeline.error("single-track diarizer failed — \(String(describing: error), privacy: .public)")
+                }
             }
 
             // ----- System stem (remote speakers) -----
@@ -198,11 +216,19 @@ final class TranscriptionPipeline {
                 Log.pipeline.notice("trimmed \((voiceSegs.count + systemSegs.count) - (trimmedVoice.count + trimmedSystem.count), privacy: .public) hallucination(s) past end-of-audio")
             }
 
-            merged = TranscriptMerger.mergeStems(
-                voice: trimmedVoice,
-                system: trimmedSystem,
-                systemDiarization: systemDiar
-            )
+            if systemURL == nil {
+                merged = TranscriptMerger.mapDiarizedSingle(
+                    segments: trimmedVoice,
+                    diarization: voiceDiar,
+                    stemLevels: nil
+                )
+            } else {
+                merged = TranscriptMerger.mergeStems(
+                    voice: trimmedVoice,
+                    system: trimmedSystem,
+                    systemDiarization: systemDiar
+                )
+            }
         }
 
         // Post-processing: apply user word replacements to every segment.

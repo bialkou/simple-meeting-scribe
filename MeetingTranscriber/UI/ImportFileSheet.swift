@@ -83,6 +83,6 @@ struct ImportFileSheet: View {
         .buttonStyle(.glassProminent)
         .controlSize(.extraLarge)
         .tint(Theme.accent)
-        .keyboardShortcut(language == .english ? "e" : "p", modifiers: [.command])
+        .keyboardShortcut(language == .english ? "e" : language == .russian ? "r" : "p", modifiers: [.command])
     }
 }

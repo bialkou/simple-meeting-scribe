@@ -4,18 +4,21 @@ import SwiftUI
 enum TranscriptionLanguage: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     case english = "en"
     case polish  = "pl"
+    case russian = "ru"
 
     var id: String { rawValue }
     var displayName: String {
         switch self {
         case .english: return "English"
         case .polish:  return "Polski"
+        case .russian: return "Русский"
         }
     }
     var flag: String {
         switch self {
         case .english: return "🇬🇧"
         case .polish:  return "🇵🇱"
+        case .russian: return "🇷🇺"
         }
     }
 }
@@ -29,6 +32,8 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
     // Local, but not WhisperKit: NVIDIA Parakeet TDT 0.6B v3 via FluidAudio
     // (Core ML, Apple Neural Engine). Routed to `ParakeetEngine`.
     case parakeetV3   = "parakeet-tdt-0.6b-v3"
+    // Native Swift/MLX runtime for GigaAM-v3 end-to-end RNNT.
+    case gigaamV3RNNT = "gigaam-v3-e2e-rnnt"
     // Cloud engines — not WhisperKit folders; must never reach WhisperEngine.
     case scribeV2     = "elevenlabs-scribe-v2"
     case maiTranscribe2 = "azure-mai-transcribe-2"
@@ -44,6 +49,7 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
         case .largeV3Turbo: return "Whisper Large v3 Turbo (fast, ~632 MB)"
         case .largeV3:      return "Whisper Large v3 (best quality, ~626 MB)"
         case .parakeetV3:   return "Parakeet v3 (fastest, Neural Engine, ~600 MB)"
+        case .gigaamV3RNNT: return "GigaAM-v3 RNNT (Russian, MLX, ~425 MB)"
         case .scribeV2:     return "ElevenLabs Scribe v2 (cloud)"
         case .maiTranscribe2: return "Microsoft MAI-Transcribe-2 (cloud)"
         }
@@ -53,6 +59,7 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
         case .largeV3Turbo: return "large-v3-turbo"
         case .largeV3:      return "large-v3"
         case .parakeetV3:   return "parakeet-v3"
+        case .gigaamV3RNNT: return "gigaam-v3-rnnt"
         case .scribeV2:     return "scribe-v2"
         case .maiTranscribe2: return "mai-transcribe-2"
         }
@@ -63,6 +70,7 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
         case .largeV3Turbo: return "Turbo"
         case .largeV3:      return "Large"
         case .parakeetV3:   return "Parakeet"
+        case .gigaamV3RNNT: return "GigaAM"
         case .scribeV2:     return "Scribe"
         case .maiTranscribe2: return "MAI"
         }
@@ -72,6 +80,16 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
     var isCloud: Bool { self == .scribeV2 || self == .maiTranscribe2 }
     /// Local non-Whisper model handled by `ParakeetEngine`.
     var isParakeet: Bool { self == .parakeetV3 }
+    var isGigaAM: Bool { self == .gigaamV3RNNT }
+
+    var loadingStage: String {
+        switch self {
+        case .parakeetV3:     return "Loading Parakeet"
+        case .gigaamV3RNNT:   return "Loading GigaAM"
+        case .scribeV2, .maiTranscribe2: return "Preparing upload"
+        default:              return "Loading Whisper"
+        }
+    }
 }
 
 struct DetectedMeeting: Equatable, Hashable, Identifiable {

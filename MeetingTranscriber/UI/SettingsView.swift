@@ -76,7 +76,7 @@ private struct GeneralSettingsView: View {
                 Text("Transcription")
                     .font(Theme.sectionTitleFont)
             } footer: {
-                Text("API keys are stored in the macOS Keychain. Cloud models upload the meeting audio: MAI-Transcribe-2 to your Azure Speech resource (in the EU, MAI-Transcribe is served from North Europe), Scribe v2 to ElevenLabs.")
+                Text("API keys are stored in the macOS Keychain. Cloud models upload the meeting audio: MAI-Transcribe-2 to your Azure Speech resource (in the EU, MAI-Transcribe is served from North Europe), Scribe v2 to ElevenLabs. GigaAM-v3 RNNT runs locally and downloads its model on first use.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
