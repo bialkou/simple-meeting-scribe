@@ -24,9 +24,9 @@ actor ParakeetEngine {
         Log.parakeet.notice("transcribed \(url.lastPathComponent, privacy: .public) in \(result.processingTime, privacy: .public)s, \(result.tokenTimings?.count ?? 0, privacy: .public) tokens")
 
         progress(0.85, "Aligning segments…")
-        let tokens = (result.tokenTimings ?? []).map {
-            ParakeetToken(text: $0.token, start: $0.startTime, end: $0.endTime)
-        }
+        let tokens: [ParakeetToken] = result.tokenTimings?.map { timing in
+            ParakeetToken(text: timing.token, start: timing.startTime, end: timing.endTime)
+        } ?? []
         var segments = ParakeetSegmenter.segments(from: tokens)
 
         // Token timings are optional in FluidAudio's result; fall back to one

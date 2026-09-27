@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Debug, swap /Applications/MeetingTranscriber.app, re-register with
+# Build Debug, swap /Applications/MeetX.app, re-register with
 # Launch Services. Single admin prompt at the end via osascript.
 #
 # Usage:
@@ -26,7 +26,7 @@ done
 # Locate the freshest Debug build. The DerivedData hash is stable per-user but
 # resolve it dynamically so the script survives an Xcode reset.
 find_app() {
-  ls -dt ~/Library/Developer/Xcode/DerivedData/MeetingTranscriber-*/Build/Products/Debug/MeetingTranscriber.app 2>/dev/null | head -n 1
+  ls -dt ~/Library/Developer/Xcode/DerivedData/MeetingTranscriber-*/Build/Products/Debug/MeetX.app 2>/dev/null | head -n 1
 }
 
 if [[ $BUILD -eq 1 ]]; then
@@ -36,6 +36,7 @@ if [[ $BUILD -eq 1 ]]; then
     -scheme MeetingTranscriber \
     -configuration Debug \
     -destination 'platform=macOS' \
+    -skipMacroValidation \
     -quiet \
     build
 fi
@@ -48,15 +49,15 @@ if [[ -z "$APP_SRC" || ! -d "$APP_SRC" ]]; then
 fi
 
 echo "→ Quitting running instance (if any)…"
-pkill -x MeetingTranscriber 2>/dev/null || true
+pkill -x MeetX 2>/dev/null || true
 sleep 0.3
 
 echo "→ Installing into /Applications (admin prompt)…"
-osascript -e "do shell script \"rm -rf /Applications/MeetingTranscriber.app && cp -R '$APP_SRC' /Applications/ && /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/MeetingTranscriber.app\" with administrator privileges"
+osascript -e "do shell script \"rm -rf /Applications/MeetX.app && cp -R '$APP_SRC' /Applications/ && /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/MeetX.app\" with administrator privileges"
 
 if [[ $LAUNCH -eq 1 ]]; then
   echo "→ Launching…"
-  open -a /Applications/MeetingTranscriber.app
+  open -a /Applications/MeetX.app
 fi
 
 echo "✓ Done."

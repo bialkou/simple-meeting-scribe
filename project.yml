@@ -14,7 +14,7 @@ settings:
     # ad-hoc signing ("-") changed the identity on every build and silently
     # dropped system audio after each reinstall. No provisioning profile needed:
     # none of the entitlements are restricted.
-    DEVELOPMENT_TEAM: QK4DL6P9RS
+    DEVELOPMENT_TEAM: GQ8R9NH7SP
     CODE_SIGN_STYLE: Manual
     ENABLE_HARDENED_RUNTIME: YES
     MARKETING_VERSION: "0.1.0"
@@ -27,8 +27,9 @@ settings:
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   configs:
     Debug:
-      CODE_SIGN_IDENTITY: "Apple Development"
+      CODE_SIGN_IDENTITY: "Developer ID Application"
     Release:
+      DEVELOPMENT_TEAM: GQ8R9NH7SP
       CODE_SIGN_IDENTITY: "Developer ID Application"
       CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
       ARCHS: arm64
@@ -63,6 +64,10 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "26.0"
+    settings:
+      base:
+        PRODUCT_NAME: MeetX
+        SWIFT_MODULE_NAME: MeetingTranscriber
     sources:
       - path: MeetingTranscriber
     resources:
@@ -92,8 +97,8 @@ targets:
     info:
       path: MeetingTranscriber/Resources/Info.plist
       properties:
-        CFBundleName: Meeting Transcriber
-        CFBundleDisplayName: Meeting Transcriber
+        CFBundleName: MeetX
+        CFBundleDisplayName: MeetX
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleExecutable: $(EXECUTABLE_NAME)
@@ -104,11 +109,11 @@ targets:
         LSMinimumSystemVersion: "26.0"
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: "© 2026 Romuald Członkowski"
-        NSMicrophoneUsageDescription: "Meeting Transcriber records your microphone while you record a meeting."
-        NSAppleEventsUsageDescription: "Meeting Transcriber asks Arc, Safari, and Chrome for the current tab URL to detect meetings you join."
+        NSMicrophoneUsageDescription: "MeetX records your microphone while you record a meeting."
+        NSAppleEventsUsageDescription: "MeetX asks Arc, Safari, and Chrome for the current tab URL to detect meetings you join."
         NSDesktopFolderUsageDescription: "Needed only if you import files from the Desktop."
-        NSDocumentsFolderUsageDescription: "Meeting Transcriber saves transcripts to your Documents folder."
-        NSDownloadsFolderUsageDescription: "Meeting Transcriber saves mixed audio to and imports media from your Downloads folder."
+        NSDocumentsFolderUsageDescription: "MeetX saves transcripts to your Documents folder."
+        NSDownloadsFolderUsageDescription: "MeetX saves mixed audio to and imports media from your Downloads folder."
         NSSupportsAutomaticTermination: true
         NSSupportsSuddenTermination: false
         LSUIElement: false
@@ -126,6 +131,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: ""
         CODE_SIGN_ENTITLEMENTS: ""
+        BUNDLE_LOADER: "$(BUILT_PRODUCTS_DIR)/MeetX.app/Contents/MacOS/MeetX"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/MeetX.app/Contents/MacOS/MeetX"
 schemes:
   MeetingTranscriber:
     build:

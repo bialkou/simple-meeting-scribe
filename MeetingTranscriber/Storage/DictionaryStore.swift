@@ -13,7 +13,8 @@ enum DictionaryStore {
     /// and (for Polish) diacritics. Pattern taken from VoiceInk.
     static let defaultPrimes: [String: String] = [
         "en": "Hello, how are you doing? Nice to meet you.",
-        "pl": "Cześć, jak się masz? Miło cię poznać."
+        "pl": "Cześć, jak się masz? Miło cię poznać.",
+        "ru": "Здравствуйте, как вы? Рад встрече."
     ]
 
     static func loadPrimes() -> [String: String] {

@@ -54,12 +54,20 @@ enum TranscriptFormatter {
     }
 
     /// Speaker-labelled plain text suitable for feeding to an LLM.
-    /// Timestamps are dropped — they only waste tokens for summarization.
-    static func renderPlainForLLM(_ doc: TranscriptDocument) -> String {
+    /// Summary passes keep timestamps so the model can attach factual anchors
+    /// to key points; identification passes can omit them to save tokens.
+    static func renderPlainForLLM(
+        _ doc: TranscriptDocument,
+        includeTimestamps: Bool = false
+    ) -> String {
         var out = ""
         for seg in doc.segments {
             let name = doc.speakers.first(where: { $0.id == seg.speakerId })?.name ?? "Speaker"
-            out += "\(name): \(seg.text)\n"
+            if includeTimestamps {
+                out += "[\(formatTimestamp(seg.start))] \(name): \(seg.text)\n"
+            } else {
+                out += "\(name): \(seg.text)\n"
+            }
         }
         return out
     }

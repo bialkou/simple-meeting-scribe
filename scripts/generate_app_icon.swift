@@ -3,7 +3,7 @@ import AppKit
 import CoreGraphics
 import CoreText
 
-// Renders the Meeting Transcriber app icon at `size` px and writes a PNG to `url`.
+// Renders the MeetX app icon at `size` px and writes a PNG to `url`.
 func renderIcon(size: CGFloat, to url: URL) throws {
     let rect = CGRect(x: 0, y: 0, width: size, height: size)
 

@@ -1,12 +1,12 @@
 # MCP server
 
-Meeting Transcriber exposes a local [Model Context Protocol](https://modelcontextprotocol.io)
+MeetX exposes a local [Model Context Protocol](https://modelcontextprotocol.io)
 server while the app is running so Claude Code (or any other MCP-aware
 client on the same Mac) can list, read, filter, and tag your transcripts.
 
 ## What it is
 
-- **Where it runs:** in-process inside Meeting Transcriber, on a tiny
+- **Where it runs:** in-process inside MeetX, on a tiny
   HTTP listener at `http://127.0.0.1:47823/mcp`.
 - **Started/stopped with the app.** No menu toggle, no settings UI.
   Quit the app and the endpoint goes away.
@@ -55,7 +55,7 @@ ask things like:
 - "Set the tags on transcript `<id>` to `Client` and `Follow-up`."
 
 If the app isn't running, Claude Code will mark the server as down —
-launch Meeting Transcriber and re-run the request.
+launch MeetX and re-run the request.
 
 ### Project-scoped alternative
 

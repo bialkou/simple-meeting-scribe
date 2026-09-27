@@ -26,20 +26,6 @@ struct SettingsView: View {
 private struct GeneralSettingsView: View {
     @Environment(AppState.self) private var appState
 
-    /// Shown when the selected cloud model has no key configured.
-    private var missingKeyWarning: String? {
-        switch appState.selectedModel {
-        case .maiTranscribe2 where MAITranscribeEngine.transcribeURL(endpoint: appState.azureSpeechEndpoint) == nil:
-            return "MAI-Transcribe-2 needs an Azure Speech endpoint (https://…)"
-        case .maiTranscribe2 where appState.azureSpeechKey.isEmpty:
-            return "MAI-Transcribe-2 needs an Azure Speech key"
-        case .scribeV2 where appState.elevenLabsAPIKey.isEmpty:
-            return "Scribe v2 needs an ElevenLabs API key"
-        default:
-            return nil
-        }
-    }
-
     var body: some View {
         @Bindable var state = appState
 
@@ -52,31 +38,14 @@ private struct GeneralSettingsView: View {
                 }
                 Picker("Default language", selection: $state.defaultLanguage) {
                     ForEach(TranscriptionLanguage.allCases) { l in
-                        Text("\(l.flag) \(l.displayName)").tag(l)
+                        Text("\(l.tag) \(l.displayName)").tag(l)
                     }
-                }
-                TextField("Azure Speech endpoint", text: Binding(
-                    get: { appState.azureSpeechEndpoint },
-                    set: { appState.setAzureSpeechEndpoint($0) }
-                ), prompt: Text(verbatim: "https://<resource>.cognitiveservices.azure.com/"))
-                SecureField("Azure Speech key", text: Binding(
-                    get: { appState.azureSpeechKey },
-                    set: { appState.setAzureSpeechKey($0) }
-                ))
-                SecureField("ElevenLabs API key", text: Binding(
-                    get: { appState.elevenLabsAPIKey },
-                    set: { appState.setElevenLabsAPIKey($0) }
-                ))
-                if let warning = missingKeyWarning {
-                    Label(warning, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
                 }
             } header: {
                 Text("Transcription")
                     .font(Theme.sectionTitleFont)
             } footer: {
-                Text("API keys are stored in the macOS Keychain. Cloud models upload the meeting audio: MAI-Transcribe-2 to your Azure Speech resource (in the EU, MAI-Transcribe is served from North Europe), Scribe v2 to ElevenLabs. GigaAM-v3 RNNT runs locally and downloads its model on first use.")
+                Text("Audio stays on this Mac. Whisper, Parakeet, and GigaAM run locally; models download when first used.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -143,7 +112,7 @@ private struct DictionarySettingsView: View {
             Section {
                 Picker("Language", selection: $language) {
                     ForEach(TranscriptionLanguage.allCases) { l in
-                        Text("\(l.flag) \(l.displayName)").tag(l)
+                        Text("\(l.tag) \(l.displayName)").tag(l)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -441,12 +410,13 @@ private struct SummarySettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var englishPromptDraft: String = ""
     @State private var polishPromptDraft: String = ""
+    @State private var russianPromptDraft: String = ""
     @State private var englishPromptSaved: Bool = false
     @State private var polishPromptSaved: Bool = false
+    @State private var russianPromptSaved: Bool = false
     @State private var selectedGlossaryIDs: Set<UUID> = []
     @State private var newGlossaryTerm: String = ""
     @State private var newGlossaryDefinition: String = ""
-    @State private var editingDeployment: AzureDeployment?
 
     var body: some View {
         @Bindable var state = appState
@@ -470,6 +440,7 @@ private struct SummarySettingsView: View {
             Section {
                 defaultModelPicker("English", language: .english)
                 defaultModelPicker("Polish", language: .polish)
+                defaultModelPicker("Русский", language: .russian)
             } header: {
                 Text("Default model per language")
                     .font(Theme.sectionTitleFont)
@@ -493,22 +464,40 @@ private struct SummarySettingsView: View {
             }
 
             Section {
-                ForEach(appState.azureDeployments) { deployment in
-                    AzureDeploymentRow(deployment: deployment) {
-                        editingDeployment = deployment
+                TextField("Endpoint", text: Binding(
+                    get: { appState.customSummaryEndpoint },
+                    set: { appState.setCustomSummaryEndpoint($0) }
+                ), prompt: Text(verbatim: "http://127.0.0.1:1234/v1"))
+                SecureField("API key (optional)", text: Binding(
+                    get: { appState.customSummaryAPIKey },
+                    set: { appState.setCustomSummaryAPIKey($0) }
+                ))
+                HStack {
+                    Button {
+                        Task { await appState.refreshCustomSummaryModels() }
+                    } label: {
+                        Label("Load models", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.pressable)
+                    .disabled(appState.customSummaryModelsLoading)
+                    if appState.customSummaryModelsLoading {
+                        ProgressView().controlSize(.small)
+                    } else if !appState.customSummaryModels.isEmpty {
+                        Text("\(appState.customSummaryModels.count) model(s)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                Button {
-                    editingDeployment = AzureDeployment()
-                } label: {
-                    Label("Add Deployment…", systemImage: "plus")
+                if let error = appState.customSummaryModelsError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
                 }
-                .buttonStyle(.pressable)
             } header: {
-                Text("Azure OpenAI deployments")
+                Text("Local summarization endpoint")
                     .font(Theme.sectionTitleFont)
             } footer: {
-                Text("Summarizing with an Azure deployment sends the transcript to that Azure resource. Pick a deployment as a default above or per meeting next to the Summarize button. Keys are stored in the macOS Keychain.")
+                Text("Optional local OpenAI-compatible server. MeetX reads model IDs from /v1/models and sends summaries to /v1/chat/completions. Leave empty to use the built-in MLX models. The API key is stored in the macOS Keychain.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -558,6 +547,29 @@ private struct SummarySettingsView: View {
                         .controlSize(.small)
                         .buttonStyle(.pressable)
                         .disabled(polishPromptDraft == appState.systemPromptPolish)
+                    }
+                }
+                VStack(alignment: .leading, spacing: Theme.space3) {
+                    Text("Русский").font(.subheadline).foregroundStyle(.secondary)
+                    TextEditor(text: $russianPromptDraft)
+                        .font(.body)
+                        .frame(minHeight: 64)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Color.primary.opacity(0.15)))
+                    HStack {
+                        Spacer()
+                        Button("Reset") {
+                            russianPromptDraft = SummaryStore.defaultSystemPrompt(for: .russian)
+                            appState.setSystemPrompt(russianPromptDraft, for: .russian)
+                        }
+                        .controlSize(.small)
+                        .buttonStyle(.pressable)
+                        Button(russianPromptSaved ? "Saved ✓" : "Save") {
+                            appState.setSystemPrompt(russianPromptDraft, for: .russian)
+                            flash(\.russianPromptSaved)
+                        }
+                        .controlSize(.small)
+                        .buttonStyle(.pressable)
+                        .disabled(russianPromptDraft == appState.systemPromptRussian)
                     }
                 }
             } header: {
@@ -616,7 +628,7 @@ private struct SummarySettingsView: View {
                 Text("Glossary")
                     .font(Theme.sectionTitleFont)
             } footer: {
-                Text("Domain terms with short definitions. When the per-summary toggle is on, enabled entries are injected into the LLM's system prompt so it interprets proper nouns and jargon correctly.")
+                Text("Domain terms with short definitions. Enabled entries are injected into the local model prompt so table, database, and service names keep their exact spelling.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -636,14 +648,15 @@ private struct SummarySettingsView: View {
         .onAppear {
             englishPromptDraft = appState.systemPromptEnglish
             polishPromptDraft  = appState.systemPromptPolish
-        }
-        .sheet(item: $editingDeployment) { deployment in
-            AzureDeploymentEditor(deployment: deployment)
+            russianPromptDraft  = appState.systemPromptRussian
+            if !appState.customSummaryEndpoint.isEmpty && appState.customSummaryModels.isEmpty {
+                Task { await appState.refreshCustomSummaryModels() }
+            }
         }
     }
 
-    /// Local models that support `language`, then every Azure deployment
-    /// (the cloud models are multilingual).
+    /// Built-in models that support `language`, then the models exposed by the
+    /// optional local endpoint.
     private func defaultModelPicker(_ title: String, language: TranscriptionLanguage) -> some View {
         Picker(title, selection: Binding(
             get: { appState.defaultSummaryModel(for: language) },
@@ -652,10 +665,10 @@ private struct SummarySettingsView: View {
             ForEach(LanguageModel.allCases.filter { $0.supportedLanguages.contains(language) }) { m in
                 Text(m.displayName).tag(SummaryModel.local(m))
             }
-            if !appState.azureDeployments.isEmpty {
+            if !appState.customSummaryModels.isEmpty {
                 Divider()
-                ForEach(appState.azureDeployments) { d in
-                    Text(appState.displayName(for: .azure(d.id))).tag(SummaryModel.azure(d.id))
+                ForEach(appState.customSummaryModels, id: \.self) { model in
+                    Text(appState.displayName(for: .custom(model))).tag(SummaryModel.custom(model))
                 }
             }
         }
@@ -686,49 +699,14 @@ private struct SummarySettingsView: View {
                 try? await Task.sleep(for: .milliseconds(1200))
                 polishPromptSaved = false
             }
+        case \SummarySettingsView.russianPromptSaved:
+            russianPromptSaved = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1200))
+                russianPromptSaved = false
+            }
         default: break
         }
-    }
-}
-
-private struct AzureDeploymentRow: View {
-    let deployment: AzureDeployment
-    let edit: () -> Void
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        HStack(alignment: .center, spacing: Theme.space6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(deployment.displayName).font(.headline)
-                Text("\(deployment.deployment) · \(URL(string: deployment.endpoint)?.host ?? deployment.endpoint)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                Text("Reasoning: \(deployment.reasoningEffort.displayName)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            if !appState.hasAzureAPIKey(endpoint: deployment.endpoint) {
-                Label("No key", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-            }
-            Button(action: edit) {
-                Image(systemName: "pencil")
-            }
-            .controlSize(.small)
-            .buttonStyle(.pressable)
-            .help("Edit this deployment")
-            Button(role: .destructive) {
-                appState.deleteAzureDeployment(id: deployment.id)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .controlSize(.small)
-            .buttonStyle(.pressable)
-            .help("Remove this deployment")
-        }
-        .padding(.vertical, Theme.space2)
     }
 }
 

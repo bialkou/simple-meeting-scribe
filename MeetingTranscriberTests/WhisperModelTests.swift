@@ -1,25 +1,20 @@
 import XCTest
 @testable import MeetingTranscriber
 
-/// Routing flags on the transcription-model picker enum.
 final class WhisperModelTests: XCTestCase {
-
-    func testMAIIsTheDefaultModel() {
-        XCTAssertEqual(WhisperModel.defaultModel, .maiTranscribe2)
+    func testLocalTurboIsTheDefaultModel() {
+        XCTAssertEqual(WhisperModel.defaultModel, .largeV3Turbo)
     }
 
-    func testBothCloudEnginesAreCloudAndNotParakeet() {
-        XCTAssertTrue(WhisperModel.maiTranscribe2.isCloud)
-        XCTAssertTrue(WhisperModel.scribeV2.isCloud)
-        XCTAssertFalse(WhisperModel.maiTranscribe2.isParakeet)
-        XCTAssertEqual(WhisperModel.allCases.filter(\.isCloud), [.scribeV2, .maiTranscribe2])
+    func testAllTranscriptionModelsAreLocal() {
+        XCTAssertEqual(WhisperModel.allCases.count, 4)
+        XCTAssertFalse(WhisperModel.allCases.contains { $0.rawValue.contains("azure") })
+        XCTAssertFalse(WhisperModel.allCases.contains { $0.rawValue.contains("elevenlabs") })
     }
 
     func testShortNamesAreUnique() {
-        // Re-transcribe offers every model whose shortName differs from the
-        // document's, so a collision would hide an engine.
         let names = WhisperModel.allCases.map(\.shortName)
         XCTAssertEqual(Set(names).count, names.count)
-        XCTAssertEqual(WhisperModel.maiTranscribe2.shortName, "mai-transcribe-2")
+        XCTAssertEqual(WhisperModel.largeV3Turbo.shortName, "large-v3-turbo")
     }
 }

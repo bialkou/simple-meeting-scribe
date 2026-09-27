@@ -6,7 +6,7 @@ struct MeetingTranscriberApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
-        WindowGroup("Meeting Transcriber", id: "main") {
+        WindowGroup("", id: "main") {
             RootView()
                 .environment(state)
                 .frame(minWidth: 960, minHeight: 620)

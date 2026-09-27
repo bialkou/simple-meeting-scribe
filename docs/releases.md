@@ -129,10 +129,10 @@ Push the exact built commit and an annotated version tag to the repository first
 Create the tag on the commit recorded in `release.json`, not on later edits:
 
 ```sh
-git tag -a v0.1.0 <built-commit> -m 'Simple Meeting Scribe 0.1.0'
+git tag -a v0.1.0 <built-commit> -m 'MeetX 0.1.0'
 git push origin v0.1.0
 scripts/github-release.sh \
-  dist/Simple-Meeting-Scribe-0.1.0-arm64-build1 \
+  dist/MeetX-0.1.0-arm64-build1 \
   /path/to/release-notes.md
 ```
 
@@ -159,8 +159,8 @@ Applications and check:
 Verify without changing permissions or bypassing quarantine:
 
 ```sh
-xcrun stapler validate /Applications/MeetingTranscriber.app
-spctl --assess --type execute --verbose=2 /Applications/MeetingTranscriber.app
+xcrun stapler validate /Applications/MeetX.app
+spctl --assess --type execute --verbose=2 /Applications/MeetX.app
 ```
 
 Then publish the draft in GitHub's release editor. There is no automatic updater;

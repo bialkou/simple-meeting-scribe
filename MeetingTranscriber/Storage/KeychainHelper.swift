@@ -47,7 +47,7 @@ enum KeychainHelper {
 
 /// One API key kept as a generic password under the app's Keychain service.
 private struct StoredAPIKey {
-    private static let service = "com.czlonkowski.MeetingTranscriber"
+    private static let service = "com.czlonkowski.MeetX"
     let account: String
 
     /// Returns nil when no key is configured.
@@ -68,50 +68,11 @@ private struct StoredAPIKey {
     }
 }
 
-/// ElevenLabs Scribe credentials.
-enum ScribeStore {
-    private static let key = StoredAPIKey(account: "elevenlabs-api-key")
+/// Optional API key for a local OpenAI-compatible summarization server.
+/// Most local servers leave this empty; it is kept in the Keychain when used.
+enum LocalSummaryAPIKeyStore {
+    private static let key = StoredAPIKey(account: "local-summary-api-key")
 
-    /// Returns nil when no key is configured.
     static func loadAPIKey() -> String? { key.load() }
-
-    /// Empty (after trimming) removes the stored key.
     static func saveAPIKey(_ value: String) { key.save(value) }
-}
-
-/// Azure Speech resource for MAI-Transcribe: the key in the Keychain, the
-/// (non-secret) endpoint in UserDefaults.
-enum AzureSpeechStore {
-    private static let key = StoredAPIKey(account: "azure-speech-key")
-    private static let endpointDefaultsKey = "Transcription.AzureSpeechEndpoint"
-
-    /// Returns nil when no key is configured.
-    static func loadAPIKey() -> String? { key.load() }
-
-    /// Empty (after trimming) removes the stored key.
-    static func saveAPIKey(_ value: String) { key.save(value) }
-
-    /// Resource endpoint, e.g. `https://<resource>.cognitiveservices.azure.com/`.
-    static func loadEndpoint() -> String {
-        UserDefaults.standard.string(forKey: endpointDefaultsKey) ?? ""
-    }
-
-    static func saveEndpoint(_ value: String) {
-        UserDefaults.standard.set(value.trimmingCharacters(in: .whitespacesAndNewlines),
-                                  forKey: endpointDefaultsKey)
-    }
-}
-
-/// Azure OpenAI API keys, one per resource (`AzureDeployment.resourceKey`),
-/// so every deployment on a resource shares its key.
-enum AzureOpenAIKeyStore {
-    private static func key(for resource: String) -> StoredAPIKey {
-        StoredAPIKey(account: "azure-openai-key:" + resource)
-    }
-
-    /// Returns nil when no key is configured.
-    static func loadAPIKey(resource: String) -> String? { key(for: resource).load() }
-
-    /// Empty (after trimming) removes the stored key.
-    static func saveAPIKey(_ value: String, resource: String) { key(for: resource).save(value) }
 }

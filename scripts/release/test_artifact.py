@@ -12,7 +12,7 @@ class ArtifactTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
-        self.name = "Simple-Meeting-Scribe-0.1.0-arm64.dmg"
+        self.name = "MeetX-0.1.0-arm64.dmg"
         (self.directory / self.name).write_bytes(b"synthetic DMG for checksum validation")
         self.digest = hashlib.sha256((self.directory / self.name).read_bytes()).hexdigest()
         self.manifest = dict(schemaVersion=1, version="0.1.0", buildNumber="1",

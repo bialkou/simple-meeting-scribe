@@ -1,17 +1,14 @@
 import SwiftUI
 
 /// Shown when the user drops a media file into the window or picks one via
-/// Browse/Import. Lets them hand-pick the transcription engine and language
-/// for this file — the engine choice is local to the sheet, so it doesn't
-/// disturb the global model selection.
+/// Browse/Import. Lets them choose the transcription language for this file.
 struct ImportFileSheet: View {
     let url: URL
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var model: WhisperModel = .largeV3Turbo
     @ScaledMetric private var sheetIconSize: CGFloat = 38
-    @ScaledMetric private var languageFlagSize: CGFloat = 28
+    @ScaledMetric private var languageTagSize: CGFloat = 28
 
     var body: some View {
         VStack(spacing: 22) {
@@ -20,7 +17,8 @@ struct ImportFileSheet: View {
                     .font(.system(size: sheetIconSize))
                     .foregroundStyle(Theme.accent)
                     .padding(10)
-                    .glassEffect(.regular.tint(Theme.accent.opacity(0.15)), in: .circle)
+                    .background(Theme.accent.opacity(0.10), in: Circle())
+                    .overlay(Circle().stroke(Theme.accent.opacity(0.18), lineWidth: 0.7))
                 Text("Import file")
                     .font(.title2.weight(.semibold))
                     .tracking(-0.4)
@@ -32,29 +30,15 @@ struct ImportFileSheet: View {
             }
             .padding(.top, Theme.space2)
 
-            VStack(spacing: Theme.space3) {
-                Text("Transcription engine")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Model", selection: $model) {
-                    ForEach(WhisperModel.allCases) { m in
-                        Text(m.compactName).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
             VStack(spacing: 10) {
                 Text("Transcribe in:")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                GlassEffectContainer(spacing: Theme.space6) {
-                    HStack(spacing: Theme.space6) {
-                        languageButton(.english)
-                        languageButton(.polish)
-                    }
+                HStack(spacing: Theme.space6) {
+                    languageButton(.english)
+                    languageButton(.polish)
+                    languageButton(.russian)
                 }
             }
 
@@ -66,23 +50,36 @@ struct ImportFileSheet: View {
         }
         .padding(28)
         .frame(width: 440)
-        .onAppear { model = appState.selectedModel }
     }
 
     private func languageButton(_ language: TranscriptionLanguage) -> some View {
         Button {
-            Task { await appState.importFile(url: url, language: language, model: model) }
+            Task { await appState.importFile(url: url, language: language) }
             dismiss()
         } label: {
             VStack(spacing: Theme.space2) {
-                Text(language.flag).font(.system(size: languageFlagSize))
+                Text(language.tag)
+                    .font(.system(size: languageTagSize * 0.55,
+                                  weight: .bold,
+                                  design: .rounded))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.primary.opacity(0.08), in: Capsule())
                 Text(language.displayName).font(.headline)
             }
             .frame(maxWidth: .infinity, minHeight: 60)
         }
-        .buttonStyle(.glassProminent)
+        .buttonStyle(.borderedProminent)
         .controlSize(.extraLarge)
         .tint(Theme.accent)
-        .keyboardShortcut(language == .english ? "e" : language == .russian ? "r" : "p", modifiers: [.command])
+        .keyboardShortcut(languageShortcut(for: language), modifiers: [.command])
+    }
+
+    private func languageShortcut(for language: TranscriptionLanguage) -> KeyEquivalent {
+        switch language {
+        case .english: "e"
+        case .polish:  "p"
+        case .russian: "r"
+        }
     }
 }

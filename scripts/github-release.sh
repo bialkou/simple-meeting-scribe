@@ -29,6 +29,6 @@ if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
     exit 1
 fi
 gh release create "$TAG" --repo "$REPOSITORY" --verify-tag --draft \
-    --title "Simple Meeting Scribe $VERSION" --notes-file "$NOTES" \
+    --title "MeetX $VERSION" --notes-file "$NOTES" \
     "$DMG" "$ARTIFACTS/SHA256SUMS" "$ARTIFACTS/release.json"
 echo "Draft created. Test the downloaded DMG on a clean Mac before publishing it on GitHub."

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Persists summarization settings (default model per language, editable system
-/// prompts, which models have been downloaded, and the registered Azure
-/// deployments) via UserDefaults.
+/// prompts, which models have been downloaded, and the optional local
+/// OpenAI-compatible endpoint via UserDefaults.
 ///
 /// Cache inspection is a pragmatic heuristic — we record the "downloaded"
 /// flag when `SummarizationEngine.prefetch` finishes successfully, and the
@@ -15,12 +15,12 @@ enum SummaryStore {
     private static let systemPromptPrefix    = "Summary.SystemPrompt."     // + language raw value
     private static let downloadedIDsKey      = "Summary.DownloadedModelIDs"
     private static let userDisplayNameKey    = "Summary.UserDisplayName"
-    private static let azureDeploymentsKey   = "Summary.AzureDeployments"
+    private static let customEndpointKey     = "Summary.CustomEndpoint"
 
     // MARK: - Defaults
 
     static func defaultModel(for language: TranscriptionLanguage) -> LanguageModel {
-        // Gemma 4 is the unified multilingual default for both languages.
+        // Gemma 4 is the unified multilingual default for all supported languages.
         switch language {
         case .english: return .gemma4_12b_it_mlx_4bit
         case .polish:  return .gemma4_12b_it_mlx_4bit
@@ -38,8 +38,7 @@ enum SummaryStore {
 
     // MARK: - Load
 
-    /// The saved default, or the built-in local one when nothing is saved or
-    /// the saved Azure deployment no longer exists.
+    /// The saved default, or the built-in local one when nothing is saved.
     static func loadDefaultModel(for language: TranscriptionLanguage) -> SummaryModel {
         let key = defaultModelPrefix + language.rawValue
         if let raw = UserDefaults.standard.string(forKey: key),
@@ -47,18 +46,20 @@ enum SummaryStore {
             switch model {
             case .local:
                 return model
-            case .azure(let id) where loadAzureDeployments().contains(where: { $0.id == id }):
+            case .custom:
                 return model
-            case .azure:
-                break
             }
         }
         return .local(defaultModel(for: language))
     }
 
-    static func loadAzureDeployments() -> [AzureDeployment] {
-        guard let data = UserDefaults.standard.data(forKey: azureDeploymentsKey) else { return [] }
-        return (try? JSONDecoder().decode([AzureDeployment].self, from: data)) ?? []
+    static func loadCustomEndpoint() -> String {
+        UserDefaults.standard.string(forKey: customEndpointKey) ?? ""
+    }
+
+    static func saveCustomEndpoint(_ endpoint: String) {
+        UserDefaults.standard.set(endpoint.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  forKey: customEndpointKey)
     }
 
     static func loadSystemPrompt(for language: TranscriptionLanguage) -> String {
@@ -86,11 +87,6 @@ enum SummaryStore {
 
     static func saveDownloadedIDs(_ ids: Set<String>) {
         UserDefaults.standard.set(Array(ids), forKey: downloadedIDsKey)
-    }
-
-    static func saveAzureDeployments(_ deployments: [AzureDeployment]) {
-        guard let data = try? JSONEncoder().encode(deployments) else { return }
-        UserDefaults.standard.set(data, forKey: azureDeploymentsKey)
     }
 
     static func loadUserDisplayName() -> String {

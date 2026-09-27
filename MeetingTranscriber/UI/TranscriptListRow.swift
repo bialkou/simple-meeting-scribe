@@ -23,7 +23,8 @@ struct TranscriptListRow: View {
                 Text("·")
                 Text(formatDuration(doc.duration))
                 Text("·")
-                Text(doc.language.flag)
+                Text(doc.language.tag)
+                    .font(.caption2.weight(.bold).monospaced())
                 if doc.sourceKind == .imported {
                     Text("·")
                     Image(systemName: "tray.and.arrow.down").imageScale(.small)

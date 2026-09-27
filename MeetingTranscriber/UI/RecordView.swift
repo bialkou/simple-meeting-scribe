@@ -7,8 +7,6 @@ struct RecordView: View {
     @State private var pulsing = false
 
     var body: some View {
-        @Bindable var state = appState
-
         ScrollView {
             VStack(spacing: Theme.space12) {
                 header
@@ -31,20 +29,11 @@ struct RecordView: View {
 
     // MARK: – Header
     private var header: some View {
-        @Bindable var state = appState
         return HStack(alignment: .firstTextBaseline) {
             Text("Record")
                 .font(Theme.titleFont)
                 .tracking(-0.5)
             Spacer()
-            Picker("Model", selection: $state.selectedModel) {
-                ForEach(WhisperModel.allCases) { m in
-                    Text(m.displayName).tag(m)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(maxWidth: 260)
-            .disabled(state.recordingState.isBusy)
         }
     }
 
@@ -80,14 +69,6 @@ struct RecordView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 440)
-            Button {
-                appState.importPanelRequested.toggle()
-            } label: {
-                Label("Browse Files…", systemImage: "folder")
-            }
-            .buttonStyle(.glass)
-            .controlSize(.large)
-            .help("Pick an audio or video file to transcribe")
         }
     }
 
@@ -103,7 +84,7 @@ struct RecordView: View {
         VStack(spacing: 18) {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(Theme.accent)
+                    .fill(Theme.recordingAccent)
                     .frame(width: 10, height: 10)
                     .opacity(reduceMotion ? 1 : (pulsing ? 0.35 : 1))
                     .animation(
@@ -122,7 +103,7 @@ struct RecordView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 Text("·").foregroundStyle(.tertiary)
-                Text("\(language.flag) \(language.displayName)")
+                Text("\(language.tag) \(language.displayName)")
                 if let mic = appState.currentInputDeviceName {
                     Text("·").foregroundStyle(.tertiary)
                     Label(mic, systemImage: "mic.fill")
@@ -283,7 +264,7 @@ struct RecordView: View {
             HStack(spacing: Theme.space8) {
                 Picker("Language", selection: $state.defaultLanguage) {
                     ForEach(TranscriptionLanguage.allCases) { l in
-                        Text("\(l.flag) \(l.displayName)").tag(l)
+                        Text("\(l.tag) \(l.displayName)").tag(l)
                     }
                 }
                 .labelsHidden()
@@ -299,7 +280,7 @@ struct RecordView: View {
                         .fixedSize()
                         .padding(.horizontal, Theme.space3)
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.extraLarge)
                 .tint(Theme.accent)
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -330,7 +311,7 @@ struct RecordView: View {
                 .frame(maxWidth: 240)
         }
         .menuStyle(.button)
-        .buttonStyle(.glass)
+        .buttonStyle(.bordered)
         .controlSize(.large)
         .fixedSize()
         .help("Microphone for this session only. Set the default in Settings.")
@@ -357,7 +338,7 @@ struct RecordView: View {
                 Label(appState.isMicMuted ? "Unmute" : "Mute mic",
                       systemImage: appState.isMicMuted ? "mic.slash.fill" : "mic.fill")
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.bordered)
             .controlSize(.large)
             .keyboardShortcut("m", modifiers: [.command, .shift])
 
@@ -370,7 +351,7 @@ struct RecordView: View {
                 } label: {
                     Label("Record screen", systemImage: "video.fill")
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .help("Start recording the meeting window now")
             }
@@ -383,9 +364,9 @@ struct RecordView: View {
                 Label("Stop", systemImage: "stop.circle.fill")
                     .padding(.horizontal, Theme.space3)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.borderedProminent)
             .controlSize(.extraLarge)
-            .tint(Theme.accent)
+            .tint(Theme.recordingAccent)
             .keyboardShortcut("r", modifiers: [.command, .shift])
         }
     }

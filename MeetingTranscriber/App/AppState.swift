@@ -69,30 +69,6 @@ final class AppState {
         availableInputDevices = AudioRecorder.availableInputDevices()
     }
 
-    /// ElevenLabs API key for Scribe v2 (persisted in the macOS Keychain).
-    var elevenLabsAPIKey: String = ScribeStore.loadAPIKey() ?? ""
-
-    func setElevenLabsAPIKey(_ value: String) {
-        elevenLabsAPIKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        ScribeStore.saveAPIKey(elevenLabsAPIKey)
-    }
-
-    /// Azure Speech key for MAI-Transcribe-2 (persisted in the macOS Keychain).
-    var azureSpeechKey: String = AzureSpeechStore.loadAPIKey() ?? ""
-
-    func setAzureSpeechKey(_ value: String) {
-        azureSpeechKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        AzureSpeechStore.saveAPIKey(azureSpeechKey)
-    }
-
-    /// Azure Speech resource endpoint for MAI-Transcribe-2 (UserDefaults).
-    var azureSpeechEndpoint: String = AzureSpeechStore.loadEndpoint()
-
-    func setAzureSpeechEndpoint(_ value: String) {
-        azureSpeechEndpoint = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        AzureSpeechStore.saveEndpoint(azureSpeechEndpoint)
-    }
-
     // MARK: – Dictionary (persisted via DictionaryStore)
     var languagePrimes: [String: String] = DictionaryStore.loadPrimes()
     var wordReplacements: [WordReplacement] = DictionaryStore.loadReplacements()
@@ -140,12 +116,16 @@ final class AppState {
     // MARK: – Summarization settings (persisted via SummaryStore)
     var defaultModelEnglish: SummaryModel  = SummaryStore.loadDefaultModel(for: .english)
     var defaultModelPolish:  SummaryModel  = SummaryStore.loadDefaultModel(for: .polish)
-    var defaultModelRussian: SummaryModel  = SummaryStore.loadDefaultModel(for: .russian)
-    var azureDeployments: [AzureDeployment] = SummaryStore.loadAzureDeployments()
+    var defaultModelRussian: SummaryModel = SummaryStore.loadDefaultModel(for: .russian)
     var systemPromptEnglish: String        = SummaryStore.loadSystemPrompt(for: .english)
     var systemPromptPolish:  String        = SummaryStore.loadSystemPrompt(for: .polish)
     var systemPromptRussian: String        = SummaryStore.loadSystemPrompt(for: .russian)
     var downloadedModelIDs:  Set<String>   = SummaryStore.loadDownloadedIDs()
+    var customSummaryEndpoint: String      = SummaryStore.loadCustomEndpoint()
+    var customSummaryAPIKey: String       = LocalSummaryAPIKeyStore.loadAPIKey() ?? ""
+    var customSummaryModels: [String]     = []
+    var customSummaryModelsLoading = false
+    var customSummaryModelsError: String?
 
     /// User's display name. When non-empty, the `summarize` identification
     /// phase replaces the mic-stem placeholder `"You"` with this value on every
@@ -178,7 +158,7 @@ final class AppState {
     func displayName(for model: SummaryModel) -> String {
         switch model {
         case .local(let local): local.displayName
-        case .azure(let id):    azureDeployment(id: id).map { "\($0.displayName) (Azure)" } ?? "Removed Azure deployment"
+        case .custom(let id):   "\(id) (локальный endpoint)"
         }
     }
 
@@ -186,7 +166,7 @@ final class AppState {
     func shortName(for model: SummaryModel) -> String {
         switch model {
         case .local(let local): local.shortName
-        case .azure(let id):    azureDeployment(id: id)?.displayName ?? "Removed Azure deployment"
+        case .custom(let id):   id
         }
     }
 
@@ -209,79 +189,47 @@ final class AppState {
         SummaryStore.saveSystemPrompt(text, for: language)
     }
 
-    // MARK: – Azure deployments (persisted via SummaryStore + Keychain)
+    // MARK: – Local endpoint
 
-    func azureDeployment(id: UUID) -> AzureDeployment? {
-        azureDeployments.first { $0.id == id }
+    func setCustomSummaryEndpoint(_ value: String) {
+        customSummaryEndpoint = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        SummaryStore.saveCustomEndpoint(customSummaryEndpoint)
+        customSummaryModels = []
+        customSummaryModelsError = nil
     }
 
-    /// Whether a key is stored for the Azure resource `endpoint` points at.
-    func hasAzureAPIKey(endpoint: String) -> Bool {
-        guard let resource = AzureDeployment.resourceKey(endpoint: endpoint) else { return false }
-        return AzureOpenAIKeyStore.loadAPIKey(resource: resource) != nil
+    func setCustomSummaryAPIKey(_ value: String) {
+        customSummaryAPIKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        LocalSummaryAPIKeyStore.saveAPIKey(customSummaryAPIKey)
     }
 
-    /// Add or update a deployment. A non-empty `apiKey` becomes the key of the
-    /// deployment's resource; an empty one keeps the stored key.
-    func saveAzureDeployment(_ deployment: AzureDeployment, apiKey: String) {
-        var cleaned = deployment
-        cleaned.name = deployment.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        cleaned.endpoint = deployment.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        cleaned.deployment = deployment.deployment.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let previousResource = azureDeployment(id: cleaned.id)?.resourceKey
-        if let idx = azureDeployments.firstIndex(where: { $0.id == cleaned.id }) {
-            azureDeployments[idx] = cleaned
-        } else {
-            azureDeployments.append(cleaned)
+    func refreshCustomSummaryModels() async {
+        guard let endpoint = LocalSummaryEndpoint(baseURL: customSummaryEndpoint) else {
+            customSummaryModels = []
+            customSummaryModelsError = customSummaryEndpoint.isEmpty
+                ? nil
+                : "Endpoint must be a local HTTP URL, for example http://127.0.0.1:1234/v1."
+            return
         }
-        SummaryStore.saveAzureDeployments(azureDeployments)
-
-        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !key.isEmpty, let resource = cleaned.resourceKey {
-            AzureOpenAIKeyStore.saveAPIKey(key, resource: resource)
+        customSummaryModelsLoading = true
+        customSummaryModelsError = nil
+        defer { customSummaryModelsLoading = false }
+        do {
+            customSummaryModels = try await LocalOpenAIClient.fetchModels(
+                endpoint: endpoint, apiKey: customSummaryAPIKey)
+                .sorted()
+        } catch {
+            customSummaryModels = []
+            customSummaryModelsError = error.localizedDescription
         }
-        if let previousResource { deleteAzureKeyIfUnused(previousResource) }
     }
 
-    /// Remove a deployment. Settings defaults that used it fall back to the
-    /// built-in local model; meetings that picked it ask for another model
-    /// when summarized, so their transcript never goes to a resource the user
-    /// didn't choose. The resource key is deleted once no deployment uses it.
-    func deleteAzureDeployment(id: UUID) {
-        guard let idx = azureDeployments.firstIndex(where: { $0.id == id }) else { return }
-        let removed = azureDeployments.remove(at: idx)
-        SummaryStore.saveAzureDeployments(azureDeployments)
-        for language in TranscriptionLanguage.allCases
-        where defaultSummaryModel(for: language) == .azure(id) {
-            setDefaultModel(.local(SummaryStore.defaultModel(for: language)), for: language)
+    private func customSummaryClient(for modelID: String) throws -> LocalOpenAIClient {
+        guard let endpoint = LocalSummaryEndpoint(baseURL: customSummaryEndpoint) else {
+            throw LocalOpenAIClient.LocalOpenAIError.invalidEndpoint
         }
-        if let resource = removed.resourceKey { deleteAzureKeyIfUnused(resource) }
-    }
-
-    private func deleteAzureKeyIfUnused(_ resource: String) {
-        guard !azureDeployments.contains(where: { $0.resourceKey == resource }) else { return }
-        AzureOpenAIKeyStore.saveAPIKey("", resource: resource)
-    }
-
-    /// Send a tiny request with the editor's current values. An empty
-    /// `apiKey` uses the key stored for the endpoint's resource.
-    func testAzureDeployment(_ deployment: AzureDeployment, apiKey: String) async throws -> String {
-        let typed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = typed.isEmpty
-            ? deployment.resourceKey.flatMap { AzureOpenAIKeyStore.loadAPIKey(resource: $0) } ?? ""
-            : typed
-        return try await AzureOpenAIClient(deployment: deployment, apiKey: key).test()
-    }
-
-    /// The Azure client for a deployment, or the error explaining why it
-    /// can't be used.
-    private func azureClient(for id: UUID) throws -> AzureOpenAIClient {
-        guard let deployment = azureDeployment(id: id) else {
-            throw AzureOpenAIClient.AzureOpenAIError.deploymentRemoved
-        }
-        let key = deployment.resourceKey.flatMap { AzureOpenAIKeyStore.loadAPIKey(resource: $0) } ?? ""
-        return try AzureOpenAIClient(deployment: deployment, apiKey: key)
+        return try LocalOpenAIClient(endpoint: endpoint, model: modelID,
+                                     apiKey: customSummaryAPIKey)
     }
 
     // MARK: – Summarization runtime state
@@ -296,13 +244,13 @@ final class AppState {
     /// Where one summary run's passes go, resolved before the run starts.
     private enum SummaryBackend: Sendable {
         case local(LanguageModel)
-        case azure(AzureOpenAIClient)
+        case custom(LocalOpenAIClient)
 
         /// Recorded as the summary's model on the transcript.
         var shortName: String {
             switch self {
             case .local(let model):  model.shortName
-            case .azure(let client): client.deployment.shortName
+            case .custom(let client): client.model
             }
         }
     }
@@ -312,6 +260,7 @@ final class AppState {
         case loadingModel(fraction: Double)
         // First pass — read transcript, propose names for placeholder speakers.
         case identifyingSpeakers
+        case polishingTranscript
         case generatingSummary(text: String)
         // Summary is finalized at this point — carried forward so the UI keeps
         // it visible while the title pass runs.
@@ -441,9 +390,9 @@ final class AppState {
         switch resolvedModel {
         case .local(let local):
             backend = .local(local)
-        case .azure(let id):
+        case .custom(let modelID):
             do {
-                backend = .azure(try azureClient(for: id))
+                backend = .custom(try customSummaryClient(for: modelID))
             } catch {
                 // Surface in the summary card; the existing summary stays.
                 summarizingTranscriptID = transcriptID
@@ -460,7 +409,18 @@ final class AppState {
         let glossaryAppendix: String? = useGlossary
             ? SummaryPrompts.glossaryBlock(for: language, terms: glossaryTerms)
             : nil
-        let systemPrompt: String = glossaryAppendix.map { basePrompt + "\n\n" + $0 } ?? basePrompt
+        let promptAppendices = [
+            SummaryPrompts.technicalTermsBlock(for: language),
+            glossaryAppendix
+        ].compactMap { $0 }
+        let systemPrompt = ([basePrompt] + promptAppendices).joined(separator: "\n\n")
+        // The regular summary system prompt asks models to preserve terms as
+        // transcribed, which conflicts with this pass's job of correcting
+        // obvious recognition errors. Keep the same glossary but use a
+        // narrowly scoped editor role for polishing.
+        let polishingSystemPrompt = ([
+            "You are a conservative transcript editor. Correct only clear recognition and punctuation errors; preserve meaning and all structural metadata."
+        ] + promptAppendices).joined(separator: "\n\n")
         let initialFeed = TranscriptFormatter.renderPlainForLLM(doc)
         let configuredUserName = userDisplayName
         let currentTitle = doc.title
@@ -475,7 +435,7 @@ final class AppState {
             // Keep the resident model for this run; re-armed when it ends.
             cancelIdleUnload()
             summarizationStage = .loadingModel(fraction: 0)
-        case .azure:
+        case .custom:
             summarizationStage = .identifyingSpeakers
         }
 
@@ -485,20 +445,26 @@ final class AppState {
             }
             /// One streamed LLM pass on the run's backend.
             func streamPass(_ pass: SummaryPass, prompt: String) async throws -> AsyncThrowingStream<String, Error> {
+                let instructions: String
+                switch pass {
+                case .polishTranscript: instructions = polishingSystemPrompt
+                default:                instructions = systemPrompt
+                }
                 switch backend {
                 case .local(let local):
-                    try await summaryEngine.stream(
+                    return try await summaryEngine.stream(
                         prompt: prompt,
-                        instructions: systemPrompt,
+                        instructions: instructions,
                         maxTokens: pass.localMaxTokens,
                         temperature: pass.localTemperature,
                         disableThinking: local.usesThinkingMode
                     )
-                case .azure(let client):
-                    client.stream(
+                case .custom(let client):
+                    return client.stream(
                         prompt: prompt,
-                        instructions: systemPrompt,
-                        maxCompletionTokens: pass.cloudMaxCompletionTokens
+                        instructions: instructions,
+                        maxTokens: pass.endpointMaxTokens,
+                        temperature: pass.localTemperature
                     )
                 }
             }
@@ -561,20 +527,91 @@ final class AppState {
                 }
 
                 // 3) Persist relabeled speakers immediately so the UI updates
-                //    even if a later pass fails, then re-render the LLM feed.
-                let feed: String = await MainActor.run {
+                //    even if a later pass fails.
+                var workingDocument: TranscriptDocument = await MainActor.run {
                     guard let self,
                           let idx = self.transcripts.firstIndex(where: { $0.id == transcriptID })
-                    else { return initialFeed }
+                    else {
+                        var fallback = doc
+                        fallback.speakers = workingSpeakers
+                        return fallback
+                    }
                     if self.transcripts[idx].speakers != workingSpeakers {
                         var updated = self.transcripts[idx]
                         updated.speakers = workingSpeakers
                         self.transcripts[idx] = updated
                         try? TranscriptStore.shared.save(updated, audioSource: nil)
-                        return TranscriptFormatter.renderPlainForLLM(updated)
+                        return updated
                     }
-                    return initialFeed
+                    return self.transcripts[idx]
                 }
+
+                // --- Transcript polishing ---
+                // The model may only replace text. IDs, timing, speakers and
+                // order remain local and every response batch is validated.
+                await MainActor.run { self?.summarizationStage = .polishingTranscript }
+                do {
+                    for indices in TranscriptPolishing.batches(for: workingDocument.segments) {
+                        let basePrompt = try TranscriptPolishing.prompt(
+                            for: language,
+                            segments: workingDocument.segments,
+                            indices: indices
+                        )
+                        var accepted: [TranscriptSegment]?
+
+                        // Strict JSON is the fragile part for local models.
+                        // Retry only a rejected batch, once, instead of leaving
+                        // an arbitrary raw patch in an otherwise edited call.
+                        for attempt in 0..<2 {
+                            let prompt = attempt == 0
+                                ? basePrompt
+                                : basePrompt + "\n\nYour previous response did not match the required JSON schema. Return the complete JSON array only, with every supplied index exactly once."
+                            do {
+                                let stream = try await streamPass(.polishTranscript, prompt: prompt)
+                                var raw = ""
+                                for try await chunk in stream {
+                                    if Task.isCancelled { throw SummarizationError.cancelled }
+                                    raw += chunk
+                                }
+                                try Task.checkCancellation()
+                                accepted = TranscriptPolishing.apply(
+                                    raw,
+                                    to: workingDocument.segments,
+                                    expectedIndices: indices
+                                )
+                                if accepted != nil { break }
+                            } catch is CancellationError {
+                                throw CancellationError()
+                            } catch {
+                                Log.summary.warning("transcript polish batch attempt failed: \(error.localizedDescription, privacy: .public)")
+                            }
+                        }
+
+                        guard let polished = accepted else {
+                            Log.summary.warning("transcript polish batch rejected twice; keeping original text")
+                            continue
+                        }
+                        workingDocument.segments = polished
+                    }
+                    await MainActor.run {
+                        guard let self,
+                              let idx = self.transcripts.firstIndex(where: { $0.id == transcriptID })
+                        else { return }
+                        self.transcripts[idx].segments = workingDocument.segments
+                        try? TranscriptStore.shared.save(self.transcripts[idx], audioSource: nil)
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    let msg = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                    Log.summary.warning("transcript polish skipped: \(msg, privacy: .public)")
+                }
+
+                let summaryFeed = TranscriptFormatter.renderPlainForLLM(
+                    workingDocument,
+                    includeTimestamps: true
+                )
 
                 // --- Summary pass ---
                 await MainActor.run {
@@ -588,7 +625,7 @@ final class AppState {
                         SummaryPrompts.summaryInstruction(for: language))
                 let summaryPrompt =
                     effectiveSummaryInstruction
-                    + "\n\nTranscript:\n" + feed
+                    + "\n\nTranscript:\n" + summaryFeed
                 let summaryStream = try await streamPass(.summary, prompt: summaryPrompt)
                 for try await chunk in summaryStream {
                     if Task.isCancelled { throw SummarizationError.cancelled }
@@ -611,23 +648,33 @@ final class AppState {
                     self?.summarizationStage = .generatingTitle(
                         summary: finalizedSummary)
                 }
-                var titleText = ""
-                // Title from the just-generated summary, not the transcript:
-                // the model is still hot, and a ≤600-token prompt prefills in
-                // a blink where re-feeding an hour of transcript took as long
-                // as the summary pass itself.
-                let titlePrompt =
-                    SummaryPrompts.titleInstruction(for: language)
-                    + "\n\nSummary:\n"
-                    + (finalizedSummary.isEmpty ? feed : finalizedSummary)
-                let titleStream = try await streamPass(.title, prompt: titlePrompt)
-                for try await chunk in titleStream {
-                    if Task.isCancelled { throw SummarizationError.cancelled }
-                    titleText += chunk
+                var finalTitle = ""
+                do {
+                    var titleText = ""
+                    // Title from the just-generated summary, not the
+                    // transcript. The title pass has its own larger endpoint
+                    // budget because Qwen3.6 may spend tokens on reasoning.
+                    let titlePrompt =
+                        SummaryPrompts.titleInstruction(for: language)
+                        + "\n\nSummary:\n"
+                        + (finalizedSummary.isEmpty ? summaryFeed : finalizedSummary)
+                    let titleStream = try await streamPass(.title, prompt: titlePrompt)
+                    for try await chunk in titleStream {
+                        if Task.isCancelled { throw SummarizationError.cancelled }
+                        titleText += chunk
+                    }
+                    try Task.checkCancellation()
+                    finalTitle = SummaryPrompts.sanitizeTitle(titleText)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // A title is a convenience. Keep the valid summary and
+                    // current title when a local reasoning model exhausts its
+                    // short title budget or closes the stream unexpectedly.
+                    let msg = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                    Log.summary.warning("title pass skipped: \(msg, privacy: .public)")
                 }
-                try Task.checkCancellation()
-
-                let finalTitle = SummaryPrompts.sanitizeTitle(titleText)
                 let modelShort = backend.shortName
 
                 await MainActor.run {
@@ -795,12 +842,18 @@ final class AppState {
         /// overwrites that document in place (preserving the id + title,
         /// clearing any now-stale summary).
         let replacingDocumentID: String?
-        /// Forces a specific transcription model (local or cloud) for this
-        /// job regardless of the user's global
+        /// Forces a specific local transcription model for this job regardless
+        /// of the user's global
         /// `selectedModel`. Used by Re-transcribe.
         let modelOverride: WhisperModel?
         var stage: Stage
         let createdAt: Date
+        /// Optional summary settings carried from the regeneration popover.
+        /// Fresh recordings and imports use the language defaults.
+        let summaryModel: SummaryModel?
+        let summaryInstruction: String?
+        let summaryUseGlossary: Bool
+        let summaryInferSpeakerNames: Bool
     }
 
     var processingJobs: [ProcessingJob] = []
@@ -845,6 +898,11 @@ final class AppState {
         didBootstrap = true
         loadTagCatalog()
         await loadTranscripts()
+        if !customSummaryEndpoint.isEmpty {
+            Task { @MainActor [weak self] in
+                await self?.refreshCustomSummaryModels()
+            }
+        }
         startMeetingDetection()
     }
 
@@ -986,7 +1044,11 @@ final class AppState {
                 replacingDocumentID: nil,
                 modelOverride: nil,
                 stage: .queued,
-                createdAt: Date()
+                createdAt: Date(),
+                summaryModel: nil,
+                summaryInstruction: nil,
+                summaryUseGlossary: true,
+                summaryInferSpeakerNames: true
             )
             enqueueJob(job)
             recordingState = .idle
@@ -1035,7 +1097,11 @@ final class AppState {
             replacingDocumentID: nil,
             modelOverride: model,
             stage: .queued,
-            createdAt: Date()
+            createdAt: Date(),
+            summaryModel: nil,
+            summaryInstruction: nil,
+            summaryUseGlossary: true,
+            summaryInferSpeakerNames: true
         )
         enqueueJob(job)
     }
@@ -1047,7 +1113,14 @@ final class AppState {
     /// diarization fresh (speaker renames will be lost). No-op if the document
     /// has no voice stem on disk, or if a re-transcription is already in
     /// flight for this document.
-    func retranscribe(documentID: String, with model: WhisperModel) {
+    func retranscribe(
+        documentID: String,
+        with model: WhisperModel,
+        summaryModel: SummaryModel? = nil,
+        customSummaryInstruction: String? = nil,
+        useGlossary: Bool = true,
+        inferSpeakerNames: Bool = true
+    ) {
         guard let doc = transcripts.first(where: { $0.id == documentID }) else { return }
         guard let voiceURL = TranscriptStore.shared.audioURL(for: doc) else {
             lastError = "Can't re-transcribe: audio file is missing."
@@ -1072,7 +1145,11 @@ final class AppState {
             replacingDocumentID: documentID,
             modelOverride: model,
             stage: .queued,
-            createdAt: Date()
+            createdAt: Date(),
+            summaryModel: summaryModel,
+            summaryInstruction: customSummaryInstruction,
+            summaryUseGlossary: useGlossary,
+            summaryInferSpeakerNames: inferSpeakerNames
         )
         enqueueJob(job)
     }
@@ -1162,19 +1239,18 @@ final class AppState {
                 }
             }
             let prime = languagePrimes[language.rawValue] ?? ""
-            let freshDoc = try await pipeline.run(voiceURL: voiceURL,
-                                                  systemURL: systemURL,
-                                                  duration: duration,
-                                                  language: language,
-                                                  model: model,
-                                                  meeting: meeting,
-                                                  sourceKind: sourceKind,
-                                                  importedFileName: importedName,
-                                                  initialPrompt: prime.isEmpty ? nil : prime,
-                                                  wordReplacements: wordReplacements,
-                                                  phraseHints: MAISegmenter.phraseHints(glossary: glossaryTerms,
-                                                                                        replacements: wordReplacements),
-                                                  progress: progress)
+            let result = try await pipeline.run(voiceURL: voiceURL,
+                                                systemURL: systemURL,
+                                                duration: duration,
+                                                language: language,
+                                                model: model,
+                                                meeting: meeting,
+                                                sourceKind: sourceKind,
+                                                importedFileName: importedName,
+                                                initialPrompt: prime.isEmpty ? nil : prime,
+                                                wordReplacements: wordReplacements,
+                                                progress: progress)
+            let freshDoc = result.document
 
             // For re-transcription, preserve the existing document's identity
             // (id, title, date, audio filename, source) and overlay the fresh
@@ -1206,16 +1282,54 @@ final class AppState {
             await loadTranscripts()
             selectedTranscriptID = docToSave.id
             processingJobs.removeAll { $0.id == jobID }
-        } catch {
-            // Cloud-engine errors already carry actionable, self-contained
-            // messages; prefixing them with "Transcription failed:" reads doubly framed.
-            if error is ScribeEngine.ScribeError || error is MAITranscribeEngine.MAIError {
-                lastError = error.localizedDescription
-            } else {
-                lastError = "Transcription failed: \(error.localizedDescription)"
+            if !docToSave.segments.isEmpty {
+                scheduleAutomaticSummary(
+                    transcriptID: docToSave.id,
+                    model: job.summaryModel,
+                    customSummaryInstruction: job.summaryInstruction,
+                    useGlossary: job.summaryUseGlossary,
+                    inferSpeakerNames: job.summaryInferSpeakerNames
+                )
             }
+            if !result.warnings.isEmpty {
+                let warning = "Transcript saved. Speaker-diarization warning: \(result.warnings.joined(separator: "; "))"
+                if let lastError, !lastError.isEmpty {
+                    self.lastError = "\(lastError)\n\n\(warning)"
+                } else {
+                    lastError = warning
+                }
+            }
+        } catch {
+            lastError = "Transcription failed: \(error.localizedDescription)"
             // Drop the failed job from the queue so the drain continues.
             processingJobs.removeAll { $0.id == jobID }
+        }
+    }
+
+    /// Start the summary only after the new transcript is persisted and the
+    /// processing job is removed. That way the transcript remains available if
+    /// a local model fails or closes its stream during summarization.
+    private func scheduleAutomaticSummary(
+        transcriptID: String,
+        model: SummaryModel?,
+        customSummaryInstruction: String?,
+        useGlossary: Bool,
+        inferSpeakerNames: Bool
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            while self.summarizeTask != nil {
+                if Task.isCancelled { return }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            guard !Task.isCancelled else { return }
+            self.summarize(
+                transcriptID: transcriptID,
+                customSummaryInstruction: customSummaryInstruction,
+                model: model,
+                useGlossary: useGlossary,
+                inferSpeakerNames: inferSpeakerNames
+            )
         }
     }
 
@@ -1244,7 +1358,8 @@ final class AppState {
             videoStartOffset: existing.videoStartOffset,
             summary: nil,
             summaryModelShortName: nil,
-            summaryGeneratedAt: nil
+            summaryGeneratedAt: nil,
+            summaryModelOverride: existing.summaryModelOverride
         )
     }
 
@@ -1294,6 +1409,28 @@ final class AppState {
               let sIdx = transcripts[tIdx].speakers.firstIndex(where: { $0.id == speakerID }) else { return }
         transcripts[tIdx].speakers[sIdx].name = trimmed
         try? TranscriptStore.shared.save(transcripts[tIdx], audioSource: nil)
+    }
+
+    func mergeSpeakers(transcriptID: String, sourceID: Int, into targetID: Int) {
+        guard let tIdx = transcripts.firstIndex(where: { $0.id == transcriptID }),
+              let updated = SpeakerEditing.merge(transcripts[tIdx],
+                                                 sourceID: sourceID,
+                                                 into: targetID) else { return }
+        transcripts[tIdx] = updated
+        try? TranscriptStore.shared.save(updated, audioSource: nil)
+    }
+
+    func splitSpeaker(transcriptID: String,
+                     speakerID: Int,
+                     segmentIDs: Set<UUID>,
+                     newName: String) {
+        guard let tIdx = transcripts.firstIndex(where: { $0.id == transcriptID }),
+              let updated = SpeakerEditing.split(transcripts[tIdx],
+                                                speakerID: speakerID,
+                                                segmentIDs: segmentIDs,
+                                                newName: newName) else { return }
+        transcripts[tIdx] = updated
+        try? TranscriptStore.shared.save(updated, audioSource: nil)
     }
 
     // MARK: – Tags

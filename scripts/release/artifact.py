@@ -26,7 +26,7 @@ def validate(directory):
         raise ValueError("Invalid build number")
     if manifest.get("architecture") != "arm64" or manifest.get("minimumMacOS") != "26.0":
         raise ValueError("Unexpected platform")
-    expected_name = f"Simple-Meeting-Scribe-{version}-arm64.dmg"
+    expected_name = f"MeetX-{version}-arm64.dmg"
     if manifest.get("dmg") != expected_name:
         raise ValueError("Unexpected DMG filename")
     hasher = hashlib.sha256()

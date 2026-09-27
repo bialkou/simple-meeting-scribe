@@ -38,7 +38,8 @@ enum LanguageModel: String, CaseIterable, Codable, Identifiable, Hashable, Senda
 
     var supportedLanguages: Set<TranscriptionLanguage> {
         switch self {
-        // Gemma 4 is multilingual (140+ languages pretrained, Polish included).
+        // Gemma 4 is multilingual (140+ languages pretrained, including
+        // Polish and Russian).
         case .gemma4_12b_it_mlx_4bit: [.polish, .english, .russian]
         case .qwen3_5_4b_mlx_8bit,
              .qwen3_5_9b_mlx_4bit:    [.english]

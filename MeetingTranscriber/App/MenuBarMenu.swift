@@ -36,7 +36,7 @@ struct MenuBarMenu: View {
         Menu("Default Language") {
             Picker("Language", selection: Bindable(state).defaultLanguage) {
                 ForEach(TranscriptionLanguage.allCases) { lang in
-                    Text("\(lang.flag) \(lang.displayName)").tag(lang)
+                    Text("\(lang.tag) \(lang.displayName)").tag(lang)
                 }
             }
             .pickerStyle(.inline)
@@ -53,7 +53,7 @@ struct MenuBarMenu: View {
 
         Divider()
 
-        Button("Quit Meeting Transcriber") {
+        Button("Quit MeetX") {
             NSApp.terminate(nil)
         }
         .keyboardShortcut("q", modifiers: .command)

@@ -7,6 +7,7 @@ import AVKit
 /// AVPlayer in sync with the audio stems.
 struct VideoPlayerCard: View {
     @Bindable var player: TranscriptAudioPlayer
+    var showsTransport: Bool = true
 
     var body: some View {
         GlassCard(padding: 14) {
@@ -17,7 +18,9 @@ struct VideoPlayerCard: View {
                         .frame(height: 340)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMedium, style: .continuous))
                 }
-                PlayerTransportRow(player: player)
+                if showsTransport {
+                    PlayerTransportRow(player: player)
+                }
             }
         }
     }

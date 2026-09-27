@@ -1,6 +1,7 @@
-# Simple Meeting Scribe
+# MeetX
 
-A personal, 100% local meeting transcriber for macOS. I built it for myself.
+A personal, 100% local meeting transcriber for macOS. MeetX keeps transcription
+and summarization on this Mac.
 I'm putting the source out there because other people asked — **not** because
 I'm trying to ship a product.
 
@@ -17,37 +18,37 @@ licensed; fork it, strip it, reshape it — it's yours.
 - Records your microphone **and** the system audio of the meeting as two
   separate tracks (so the transcript can label "You" vs "Remote").
 - Transcribes both tracks with [WhisperKit](https://github.com/argmaxinc/WhisperKit)
-  (Whisper Large v3 / v3 Turbo, CoreML / ANE). Russian audio can use
-  [GigaAM-v3 RNNT](https://github.com/kruatech/gigaam-v3-mlx) through native Swift/MLX.
-- Diarizes meeting audio and imported recordings with NVIDIA's
-  [Nemotron 3 Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization)
-  through [FluidAudio](https://github.com/FluidInference/FluidAudio) on Core ML.
+  (Whisper Large v3 / v3 Turbo, CoreML / ANE). Russian uses Whisper Large v3 Turbo
+  by default, with optional [GigaAM-v3 RNNT](https://github.com/kruatech/gigaam-v3-mlx)
+  through native Swift/MLX in the same app process.
+- Diarizes meeting audio and imported recordings with NVIDIA's [Nemotron 3 Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization)
+  through [FluidAudio](https://github.com/FluidInference/FluidAudio) on Core ML, with up to eight speaker labels.
 - Saves `.md` + `.json` transcripts to `~/Documents/MeetingTranscripts/`.
 - Optional on-device LLM summarization + action items + auto-titles via
-  [MLX](https://github.com/ml-explore/mlx-swift-lm) — Bielik for Polish,
-  Qwen3.5 for English — or with your own Azure OpenAI deployments
-  (Settings → Summary → Azure OpenAI deployments), pickable per meeting.
+  [MLX](https://github.com/ml-explore/mlx-swift-lm), or through a local
+  OpenAI-compatible endpoint. MeetX reads its models from `/v1/models` and
+  sends summaries to `/v1/chat/completions`; models are pickable per meeting.
 - Drag any `.mp4` / `.m4a` / `.mov` / `.wav` / `.mp3` onto the window to
   transcribe an existing recording.
 
 ## What it does not do
 
-- No telemetry or required app account. Local models download from Hugging Face;
-  optional Azure transcription/summarization uses your own credentials.
+- No telemetry, required app account, cloud transcription, or cloud summarization.
+  Local models download from Hugging Face when first selected or used.
 - No auto-update. No App Store listing.
 - No CI or backwards-compatibility promise.
-- The interface is in English; transcription supports English, Polish, and Russian.
+- Transcription supports English, Polish, and Russian.
 
-Local processing happens on your machine. If the network is off, models already
-downloaded keep working. Optional Azure features require a network connection.
+All inference happens on your machine. If the network is off, already-downloaded
+models and a running local endpoint keep working.
 
 ## Download the app
 
 Check [GitHub Releases](https://github.com/czlonkowski/simple-meeting-scribe/releases)
-for a signed, notarized `Simple-Meeting-Scribe-<version>-arm64.dmg`. If a release
+for a signed, notarized `MeetX-<version>-arm64.dmg`. If a release
 does not have a DMG yet, use the source build instructions below.
 
-1. Open the DMG and drag **MeetingTranscriber** into **Applications**.
+1. Open the DMG and drag **MeetX** into **Applications**.
 2. Open it from Applications and approve recording/Automation permissions when prompted.
 3. Download the local models you want to use. Initial downloads need internet access.
 
@@ -58,8 +59,8 @@ download. Maintainers: see [the release guide](docs/releases.md).
 
 ## Requirements
 
-- Apple Silicon Mac (M1 or newer; M3+ strongly recommended for the 11B
-  Polish model). Intel is not supported — MLX and WhisperKit both assume
+- Apple Silicon Mac (M1 or newer; M3+ strongly recommended for the 12B
+  multilingual model). Intel is not supported — MLX and WhisperKit both assume
   Apple Silicon.
 - macOS 26 Tahoe. The UI uses Liquid Glass, `@Observable`, and other
   macOS 26 APIs. Older macOS will not build.
@@ -69,8 +70,8 @@ download. Maintainers: see [the release guide](docs/releases.md).
 - For source builds: [LAME](https://lame.sourceforge.io/) — `brew install lame` (used only when
   exporting a mixed meeting recording as MP3).
 - ~15 GB free disk space if you want to cache all the optional models.
-- 32 GB RAM recommended for the larger LLMs (Qwen3.5-9B, Bielik-11B). 16 GB
-  works for Qwen3.5-4B and the smaller Bielik variant.
+- 32 GB RAM recommended for Gemma 4 12B. 16 GB works for the smaller
+  Qwen3.5 models or a local endpoint served by another process on this Mac.
 
 ## Build from source
 
@@ -78,8 +79,6 @@ download. Maintainers: see [the release guide](docs/releases.md).
 git clone https://github.com/czlonkowski/simple-meeting-scribe
 cd simple-meeting-scribe
 xcodegen generate
-mkdir -p MeetingTranscriber.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
-cp scripts/release/Package.resolved MeetingTranscriber.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 xcodebuild -project MeetingTranscriber.xcodeproj \
            -scheme MeetingTranscriber \
            -configuration Debug \
@@ -89,7 +88,7 @@ xcodebuild -project MeetingTranscriber.xcodeproj \
            build
 ```
 
-Run the app from `~/Library/Developer/Xcode/DerivedData/.../Debug/MeetingTranscriber.app`,
+Run the app from `~/Library/Developer/Xcode/DerivedData/.../Debug/MeetX.app`,
 or copy it into `/Applications` with `sudo cp -R …`.
 
 ## …or let an AI coding agent install it for you
@@ -99,7 +98,7 @@ similar coding agent, paste this prompt into it and let it do the work. You'll
 still need to approve Xcode / Homebrew / sudo prompts as they come up.
 
 > ```
-> Please install Simple Meeting Scribe on this Mac. It's a SwiftUI app
+> Please install MeetX on this Mac. It's a SwiftUI app
 > at https://github.com/czlonkowski/simple-meeting-scribe. Do this end
 > to end:
 >
@@ -123,19 +122,19 @@ still need to approve Xcode / Homebrew / sudo prompts as they come up.
 >    -derivedDataPath build build`
 > 7. Install to /Applications (this needs sudo — ask me to run it if you
 >    can't):
->    `sudo rm -rf /Applications/MeetingTranscriber.app &&
->     sudo cp -R build/Build/Products/Release/MeetingTranscriber.app
+>    `sudo rm -rf /Applications/MeetX.app &&
+>     sudo cp -R build/Build/Products/Release/MeetX.app
 >     /Applications/ &&
 >     sudo /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
->     -f /Applications/MeetingTranscriber.app`
+>     -f /Applications/MeetX.app`
 > 8. Open the app from /Applications once so macOS can register it, then
 >    tell me:
 >    - to grant Microphone + Screen Recording when prompted,
 >    - to approve Automation access for Arc / Safari / Chrome on first
 >      meeting detection,
->    - to open Settings → Summary → Model Library and download a model
->      before the first summarize (Qwen3.5-4B 8-bit for English,
->      Bielik-11B v3 for Polish are the defaults).
+>    - to open Settings → Summary → Model Library and download a local model
+>      before the first summarize, or configure a local OpenAI-compatible
+>      endpoint and load its `/v1/models` list.
 >
 > If any step fails, stop and show me the exact error — don't paper
 > over it. If a step asks for sudo, run it only once and with my
@@ -159,7 +158,8 @@ Published DMGs use a stable Developer ID signature.
    **Screen Recording**. Approve both.
 3. Open a meeting URL in Arc/Safari/Chrome. macOS will pop an **Automation**
    prompt for each browser the first time the app queries it.
-4. Settings → **Summary** → Model Library → pick a model, click Download.
+4. Settings → **Summary** → Model Library → pick a local model, click Download;
+   or configure a loopback OpenAI-compatible endpoint and load its models.
    Models live under `~/Documents/huggingface/models/`.
 
 ## Files on disk

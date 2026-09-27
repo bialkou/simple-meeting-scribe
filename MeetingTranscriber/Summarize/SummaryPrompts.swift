@@ -1,5 +1,76 @@
 import Foundation
 
+enum TranscriptPolishing {
+    struct Item: Codable, Equatable {
+        let index: Int
+        let text: String
+    }
+
+    static func batches(for segments: [TranscriptSegment]) -> [[Int]] {
+        var result: [[Int]] = []
+        var current: [Int] = []
+        var characters = 0
+        for index in segments.indices {
+            let count = segments[index].text.count
+            // Smaller batches make strict JSON materially more reliable on
+            // local models while retaining enough neighbouring context.
+            if !current.isEmpty && (current.count >= 24 || characters + count > 4_000) {
+                result.append(current)
+                current = []
+                characters = 0
+            }
+            current.append(index)
+            characters += count
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+
+    static func prompt(for language: TranscriptionLanguage,
+                       segments: [TranscriptSegment],
+                       indices: [Int]) throws -> String {
+        let items = indices.map { Item(index: $0, text: segments[$0].text) }
+        let payload = String(decoding: try JSONEncoder().encode(items), as: UTF8.self)
+        let instruction: String
+        switch language {
+        case .russian:
+            instruction = """
+                Причеши фрагменты транскрипции как части одного связного разговора: восстанови регистр и пунктуацию с учётом соседних фрагментов, исправь только очевидные ошибки распознавания имён, названий и технических терминов по контексту и глоссарию. Не ставь точку в конце каждого элемента автоматически: граница элемента не обязательно является границей мысли. Не сокращай, не пересказывай, не цензурируй и не добавляй новых фактов. Сохрани каждый index ровно один раз и не объединяй элементы. Верни только JSON-массив объектов {\"index\": Int, \"text\": String}, без Markdown и пояснений.
+                """
+        case .polish:
+            instruction = """
+                Wygładź fragmenty transkrypcji: popraw interpunkcję i spójność oraz tylko oczywiste błędy rozpoznawania imion, nazw i terminów technicznych na podstawie kontekstu i słownika. Nie skracaj, nie streszczaj, nie cenzuruj i nie dodawaj faktów. Zachowaj każdy index dokładnie raz i nie łącz elementów. Zwróć wyłącznie tablicę JSON obiektów {\"index\": Int, \"text\": String}, bez Markdownu i objaśnień.
+                """
+        case .english:
+            instruction = """
+                Polish these transcript fragments: restore punctuation and coherence, and correct only obvious recognition errors in names, product names, and technical terms using context and the glossary. Do not shorten, summarize, censor, or add facts. Preserve every index exactly once and do not merge items. Return only a JSON array of {\"index\": Int, \"text\": String} objects, with no Markdown or explanation.
+                """
+        }
+        return instruction + "\n\n" + payload
+    }
+
+    static func apply(_ raw: String,
+                      to segments: [TranscriptSegment],
+                      expectedIndices: [Int]) -> [TranscriptSegment]? {
+        let cleaned = SummaryPrompts.stripThinking(raw)
+        guard let first = cleaned.firstIndex(of: "["),
+              let last = cleaned.lastIndex(of: "]"), first <= last,
+              let data = String(cleaned[first...last]).data(using: .utf8),
+              let items = try? JSONDecoder().decode([Item].self, from: data),
+              items.map(\.index).sorted() == expectedIndices.sorted(),
+              Set(items.map(\.index)).count == expectedIndices.count,
+              items.allSatisfy({ !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+        else { return nil }
+
+        var result = segments
+        for item in items {
+            guard result.indices.contains(item.index) else { return nil }
+            result[item.index].text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+}
+
 /// Per-language prompt templates. Two passes per summarization (summary then
 /// title) keep streaming UX simple and robust — no JSON parsing, each block
 /// lands in its own UI card as it generates.
@@ -16,8 +87,21 @@ enum SummaryPrompts {
         "Odpowiadaj w języku transkrypcji. Zachowaj nazwy, terminy techniczne i liczby dokładnie tak, jak się pojawiają."
 
     static let defaultSystemRussian =
-        "Ты помощник по ведению заметок встреч. Пиши кратко, точно и строго по транскрипции. " +
-        "Отвечай на языке транскрипции. Сохраняй имена, технические термины и числа без изменений."
+        "Ты помощник для заметок встреч. Будь кратким, точным и верным транскрипции. " +
+        "Отвечай на языке транскрипции. Сохраняй имена, технические термины и числа точно так, как они встречаются в тексте."
+
+    /// Stable guidance for names that are meaningful identifiers, not prose.
+    /// It is appended even when the user has an older saved system prompt.
+    static func technicalTermsBlock(for language: TranscriptionLanguage) -> String {
+        switch language {
+        case .english:
+            return "Technical terminology rules: preserve the exact spelling, case, punctuation, and underscores of table, schema, database, service, API, queue, repository, and metric names. Do not translate or normalize identifiers. In the summary, put such names in backticks when appropriate. Never invent technical names that are absent from the transcript."
+        case .polish:
+            return "Zasady terminologii technicznej: zachowuj dokładną pisownię, wielkość liter, znaki interpunkcyjne i podkreślenia w nazwach tabel, schematów, baz danych, usług, API, kolejek, repozytoriów i metryk. Nie tłumacz ani nie normalizuj identyfikatorów. W streszczeniu używaj backticków dla takich nazw, gdy poprawia to czytelność. Nie wymyślaj nazw technicznych, których nie ma w transkrypcji."
+        case .russian:
+            return "Правила технической терминологии: сохраняй точное написание, регистр, знаки препинания и подчёркивания в названиях таблиц, схем, баз данных, сервисов, API, очередей, репозиториев и метрик. Не переводи и не нормализуй идентификаторы. В резюме оформляй такие названия в обратных кавычках, если это улучшает читаемость. Не придумывай технические названия, которых нет в транскрипции."
+        }
+    }
 
     /// Prompt asking the LLM to map placeholder speaker labels ("Remote",
     /// "Remote 1", …) to real names mentioned in the conversation. Strict
@@ -34,8 +118,8 @@ enum SummaryPrompts {
             intro = "Poniżej znajduje się transkrypcja spotkania z zastępczymi etykietami mówców. Dla każdej etykiety podaj prawdziwe imię, tylko jeśli rozmowa jasno to wskazuje (np. ktoś zwraca się po imieniu). Odpowiedz dokładnie jedną linią na etykietę w formacie:"
             unknown = "Jeśli żadne imię nie jest jasno wskazane dla danej etykiety, napisz 'unknown'. Nie wymyślaj imion. Nie dodawaj żadnego komentarza."
         case .russian:
-            intro = "Ниже транскрипция встречи с условными метками говорящих. Укажи настоящее имя для каждой метки, только если разговор ясно его раскрывает. Ответь ровно одной строкой на каждую метку в формате:"
-            unknown = "Если имя нельзя уверенно определить, напиши 'unknown'. Не выдумывай имена и не добавляй комментарии."
+            intro = "Ниже приведена расшифровка встречи с условными именами участников. Для каждого имени укажи настоящее имя только если разговор явно это подтверждает, например к человеку обращаются по имени. Ответь ровно одной строкой для каждого имени в формате:"
+            unknown = "Если настоящее имя явно не указано, напиши 'unknown'. Не выдумывай имена и не добавляй комментариев."
         }
         let format = "<label>: <name or unknown>"
         let bullets = labels.map { "- \($0)" }.joined(separator: "\n")
@@ -77,9 +161,12 @@ enum SummaryPrompts {
         guard !enabled.isEmpty else { return nil }
         let header: String
         switch language {
-        case .english: header = "Glossary of domain terms (use these definitions to interpret the transcript):"
-        case .polish:  header = "Słownik pojęć (użyj tych definicji do interpretacji transkrypcji):"
-        case .russian: header = "Словарь терминов (используй определения для понимания транскрипции):"
+        case .polish:
+            header = "Słownik pojęć (użyj tych definicji do interpretacji transkrypcji):"
+        case .russian:
+            header = "Глоссарий терминов (используй эти определения для интерпретации транскрипции):"
+        case .english:
+            header = "Glossary of domain terms (use these definitions to interpret the transcript):"
         }
         let lines = enabled
             .map { "- \($0.term): \($0.definition)" }
@@ -92,11 +179,77 @@ enum SummaryPrompts {
     static func summaryInstruction(for language: TranscriptionLanguage) -> String {
         switch language {
         case .english:
-            return "Write a concise summary of the meeting transcript below in 3–6 sentences. No bullets, no headers — one flowing paragraph."
+            return """
+                Write concise meeting notes from the transcript below in the transcript's language.
+
+                Use exactly these Markdown sections:
+                # Overall Summary
+                One short paragraph.
+
+                # Key Points
+                - One factual point [[M:SS]]
+
+                # Action Items
+                - One assigned or agreed action [[M:SS]]
+
+                # Open Questions
+                - One unresolved question [[M:SS]]
+
+                Rules:
+                - Keep the summary factual and concise. Use 2–6 bullets in each list only when supported by the transcript.
+                - Every substantive bullet in Key Points, Action Items, and Open Questions must end with one timestamp copied from the transcript in the form [[M:SS]] or [[H:MM:SS]].
+                - Use the timestamp of the transcript line that supports the bullet. Never invent a timestamp. Omit a bullet when there is no clear evidence.
+                - If a section has no supported items, write a single bullet without a timestamp saying that there are no supported items.
+                - Preserve names, technical identifiers, decisions, and numbers exactly as spoken. Do not add commentary outside these sections.
+                """
         case .polish:
-            return "Napisz zwięzłe streszczenie poniższej transkrypcji spotkania w 3–6 zdaniach. Bez wypunktowań, bez nagłówków — jeden płynny akapit."
+            return """
+                Napisz zwięzłe notatki ze spotkania na podstawie poniższej transkrypcji, w jej języku.
+
+                Użyj dokładnie tych sekcji Markdown:
+                # Ogólne podsumowanie
+                Jeden krótki akapit.
+
+                # Najważniejsze punkty
+                - Jeden rzeczowy punkt [[M:SS]]
+
+                # Zadania
+                - Jedno uzgodnione lub przypisane zadanie [[M:SS]]
+
+                # Otwarte pytania
+                - Jedno nierozstrzygnięte pytanie [[M:SS]]
+
+                Zasady:
+                - Pisz rzeczowo i zwięźle. Użyj 2–6 punktów w każdej liście tylko wtedy, gdy wynika to z transkrypcji.
+                - Każdy merytoryczny punkt w trzech listach musi kończyć się jednym znacznikiem czasu skopiowanym z transkrypcji: [[M:SS]] lub [[H:MM:SS]].
+                - Użyj czasu linii transkrypcji, która potwierdza dany punkt. Nie wymyślaj czasu. Pomiń punkt bez wyraźnego potwierdzenia.
+                - Jeśli sekcja nie ma potwierdzonych elementów, wpisz jeden punkt bez znacznika czasu, że brak potwierdzonych elementów.
+                - Zachowaj dokładnie imiona, identyfikatory techniczne, decyzje i liczby. Nie dodawaj komentarzy poza tymi sekcjami.
+                """
         case .russian:
-            return "Кратко изложи содержание встречи по транскрипции ниже в 3–6 предложениях. Без списков и заголовков — один связный абзац."
+            return """
+                Составь краткие заметки по приведённой транскрипции встречи на языке транскрипции.
+
+                Используй ровно эти разделы Markdown:
+                # Общее резюме
+                Один короткий связный абзац.
+
+                # Ключевые моменты
+                - Один подтверждённый факт [[M:SS]]
+
+                # Задачи
+                - Одно согласованное или назначенное действие [[M:SS]]
+
+                # Открытые вопросы
+                - Один нерешённый вопрос [[M:SS]]
+
+                Правила:
+                - Пиши кратко и по фактам. Используй 2–6 пунктов в каждом списке только если это подтверждается транскрипцией.
+                - Каждый содержательный пункт в трёх списках должен заканчиваться одним временем, скопированным из транскрипции, в формате [[M:SS]] или [[H:MM:SS]].
+                - Используй время строки транскрипции, которая подтверждает пункт. Не выдумывай время. Не добавляй пункт без явного подтверждения.
+                - Если подтверждённых элементов нет, напиши один пункт без времени о том, что их нет.
+                - Сохраняй точно имена, технические идентификаторы, решения и числа. Не добавляй комментарии вне этих разделов.
+                """
         }
     }
 
@@ -124,13 +277,13 @@ enum SummaryPrompts {
                 """
         case .russian:
             return """
-                Придумай краткое название встречи по приведённому ниже резюме.
+                Сформулируй краткий заголовок встречи по приведённому ниже резюме.
 
                 Правила:
-                • 3–8 слов.
+                • 3–8 слов, с естественным использованием заглавных букв.
                 • Без кавычек, точки в конце и вступления.
-                • Используй конкретные темы и решения вместо общих слов.
-                • Выведи название в одну строку, без пояснений.
+                • Предпочитай конкретные существительные из встречи (проект, тема, решение), а не общие слова вроде «Встреча» или «Обсуждение».
+                • Выведи заголовок в одну строку. Больше ничего.
                 """
         }
     }

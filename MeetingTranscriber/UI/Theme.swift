@@ -7,7 +7,12 @@ enum Theme {
 
     static let cornerRadius: CGFloat = radiusLarge
     static let innerPadding: CGFloat = 22
-    static let accent: Color = .red
+    /// Codex-like neutral surfaces with one restrained blue accent. Recording
+    /// status keeps its own red so the action remains immediately legible.
+    static let accent = Color(red: 0.10, green: 0.42, blue: 0.95)
+    static let recordingAccent: Color = .red
+    static let panelFill = Color.primary.opacity(0.045)
+    static let panelBorder = Color.primary.opacity(0.11)
     static let subtle: Color = .primary.opacity(0.65)
 
     static let space2: CGFloat = 4   // 4 pt
@@ -51,7 +56,6 @@ struct ChipHoverModifier: ViewModifier {
                 RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous)
                     .fill(Color.primary.opacity(hovering ? 0.07 : 0))
             }
-            .scaleEffect(reduceMotion ? 1 : (hovering ? 1.03 : 1))
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
             .onHover { hovering = $0 }
     }
@@ -63,8 +67,8 @@ extension View {
     }
 }
 
-/// A card with Liquid Glass background. Deployment target is macOS 26,
-/// so we can use `glassEffect` directly.
+/// A quiet Codex-style panel. Keep the name for existing callers, but avoid
+/// translucent Liquid Glass chrome in the main app surface.
 struct GlassCard<Content: View>: View {
     var cornerRadius: CGFloat = Theme.cornerRadius
     var padding: CGFloat = Theme.innerPadding
@@ -81,6 +85,13 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content()
             .padding(padding)
-            .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            .background(
+                Theme.panelFill,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(Theme.panelBorder, lineWidth: 0.7)
+            }
     }
 }

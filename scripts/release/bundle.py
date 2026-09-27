@@ -30,7 +30,7 @@ def prepare(app, packages, lame):
     shutil.copy2(lame / "lame", helpers / "lame")
     third_party = app / "Contents/Resources/ThirdParty"
     third_party.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "LICENSE", third_party / "Simple-Meeting-Scribe-LICENSE")
+    shutil.copy2(ROOT / "LICENSE", third_party / "MeetX-LICENSE")
     target = third_party / "LAME"
     target.mkdir()
     archives = list(lame.glob("lame-*.tar.gz"))
@@ -82,6 +82,8 @@ def verify(app, signed=False):
     require(app.is_dir(), f"Missing app: {app}")
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     require(info["CFBundleIdentifier"] == "com.czlonkowski.MeetingTranscriber", "Unexpected bundle ID")
+    require(info["CFBundleName"] == "MeetX" and info["CFBundleDisplayName"] == "MeetX",
+            "Unexpected app name")
     require(info["LSMinimumSystemVersion"] == "26.0", "Unexpected minimum macOS version")
     require(info["CFBundlePackageType"] == "APPL", "Not an application bundle")
     for relative in ["Contents/Helpers/lame", "Contents/Resources/AppIcon.icns",
@@ -95,7 +97,7 @@ def verify(app, signed=False):
         require(not any(word in path.name for word in (".debug.dylib", "__preview", "XCTest", "XCUIAutomation")),
                 f"Debug/test runtime included: {path}")
     binaries = macho_files(app)
-    require(app / "Contents/MacOS/MeetingTranscriber" in binaries, "Missing app executable")
+    require(app / "Contents/MacOS/MeetX" in binaries, "Missing app executable")
     for binary in binaries:
         require(run("lipo", "-archs", binary) == "arm64", f"Unexpected architecture: {binary}")
         for line in run("otool", "-L", binary).splitlines()[1:]:
@@ -120,7 +122,7 @@ def verify(app, signed=False):
 def sign(app, identity):
     # Sign code inside-out. --deep is only for verification, never for signing.
     for binary in sorted(macho_files(app), key=lambda p: len(p.parts), reverse=True):
-        if binary == app / "Contents/MacOS/MeetingTranscriber":
+        if binary == app / "Contents/MacOS/MeetX":
             continue
         subprocess.run(["codesign", "--force", "--sign", identity, "--timestamp", "--options", "runtime", str(binary)], check=True)
     bundles = [p for p in app.rglob("*") if p.is_dir() and not p.is_symlink() and

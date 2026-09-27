@@ -5,7 +5,7 @@ struct MeetingJoinSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @ScaledMetric private var sheetIconSize: CGFloat = 38
-    @ScaledMetric private var languageFlagSize: CGFloat = 28
+    @ScaledMetric private var languageTagSize: CGFloat = 28
 
     var body: some View {
         @Bindable var appState = appState
@@ -15,7 +15,8 @@ struct MeetingJoinSheet: View {
                     .font(.system(size: sheetIconSize))
                     .foregroundStyle(.red)
                     .padding(10)
-                    .glassEffect(.regular.tint(.red.opacity(0.15)), in: .circle)
+                    .background(Color.red.opacity(0.10), in: Circle())
+                    .overlay(Circle().stroke(Color.red.opacity(0.18), lineWidth: 0.7))
                 Text("Meeting detected")
                     .font(.title2.weight(.semibold))
                     .tracking(-0.4)
@@ -26,19 +27,6 @@ struct MeetingJoinSheet: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.top, Theme.space2)
-
-            VStack(spacing: Theme.space3) {
-                Text("Transcription engine")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Model", selection: $appState.selectedModel) {
-                    ForEach(WhisperModel.allCases) { m in
-                        Text(m.compactName).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
 
             Toggle(isOn: Binding(
                 get: { appState.recordScreen },
@@ -54,11 +42,10 @@ struct MeetingJoinSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                GlassEffectContainer(spacing: Theme.space6) {
-                    HStack(spacing: Theme.space6) {
-                        languageButton(.english)
-                        languageButton(.polish)
-                    }
+                HStack(spacing: Theme.space6) {
+                    languageButton(.english)
+                    languageButton(.polish)
+                    languageButton(.russian)
                 }
             }
 
@@ -79,14 +66,28 @@ struct MeetingJoinSheet: View {
             dismiss()
         } label: {
             VStack(spacing: Theme.space2) {
-                Text(language.flag).font(.system(size: languageFlagSize))
+                Text(language.tag)
+                    .font(.system(size: languageTagSize * 0.55,
+                                  weight: .bold,
+                                  design: .rounded))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.primary.opacity(0.08), in: Capsule())
                 Text(language.displayName).font(.headline)
             }
             .frame(maxWidth: .infinity, minHeight: 60)
         }
-        .buttonStyle(.glassProminent)
+        .buttonStyle(.borderedProminent)
         .controlSize(.extraLarge)
         .tint(.red)
-        .keyboardShortcut(language == .english ? "e" : language == .russian ? "r" : "p", modifiers: [.command])
+        .keyboardShortcut(languageShortcut(for: language), modifiers: [.command])
+    }
+
+    private func languageShortcut(for language: TranscriptionLanguage) -> KeyEquivalent {
+        switch language {
+        case .english: "e"
+        case .polish:  "p"
+        case .russian: "r"
+        }
     }
 }

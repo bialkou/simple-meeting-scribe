@@ -78,22 +78,6 @@ struct RootView: View {
             detail
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showFileImporter = true
-                } label: {
-                    Label("Import File", systemImage: "tray.and.arrow.down")
-                }
-                .help("Import an audio or video file for transcription")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .help("Open Settings (⌘,)")
-            }
-        }
         .sheet(item: $state.detectedMeeting) { meeting in
             MeetingJoinSheet(meeting: meeting)
         }
@@ -211,10 +195,17 @@ struct RootView: View {
                 }
             }
         }
-        .navigationTitle("Meeting Transcriber")
         .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
         .searchable(text: $query, placement: .sidebar, prompt: "Search transcripts and tags")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("Import File", systemImage: "tray.and.arrow.down")
+                }
+                .help("Import an audio or video file for transcription")
+            }
             ToolbarItem(placement: .primaryAction) {
                 tagFilterMenu
             }

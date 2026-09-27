@@ -2,6 +2,40 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private struct TranscriptBlock: Identifiable {
+    let segments: [TranscriptSegment]
+
+    var id: UUID { segments[0].id }
+    var start: Double { segments[0].start }
+    var speakerId: Int { segments[0].speakerId }
+    var text: String { joinTranscriptSegments(segments) }
+}
+
+private func joinTranscriptSegments(_ segments: [TranscriptSegment]) -> String {
+    var result = ""
+    let punctuation = CharacterSet(charactersIn: ",.!?;:%)]}")
+
+    for segment in segments {
+        let part = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !part.isEmpty else { continue }
+
+        if result.isEmpty,
+           let first = part.unicodeScalars.first,
+           punctuation.contains(first) {
+            result = part
+        } else if result.isEmpty {
+            result = part
+        } else if let first = part.unicodeScalars.first,
+                  punctuation.contains(first) {
+            result += part
+        } else {
+            result += " " + part
+        }
+    }
+
+    return result
+}
+
 struct TranscriptDetailView: View {
     let documentID: String
     @Environment(AppState.self) private var appState
@@ -9,15 +43,24 @@ struct TranscriptDetailView: View {
 
     @State private var renamingSpeakerID: Int? = nil
     @State private var newSpeakerNameDraft: String = ""
+    @State private var splittingSpeakerID: Int? = nil
+    @State private var splitSpeakerNameDraft: String = ""
+    @State private var selectedSplitSegmentIDs: Set<UUID> = []
     @State private var showingAddTagPopover: Bool = false
     @State private var tagNameDraft: String = ""
     @State private var titleDraft: String = ""
+    @State private var titleIsEditing: Bool = false
+    @FocusState private var titleFieldFocused: Bool
     @State private var justCopied: Bool = false
-    @State private var summaryJustCopied: Bool = false
     @State private var audioPlayer = TranscriptAudioPlayer()
-    @State private var showingCustomPromptPopover: Bool = false
-    @State private var customSummaryPrompt: String = ""
-    @State private var transcriptExpanded: Bool = false
+    @State private var showingRegeneratePopover: Bool = false
+    @State private var regenerationWhisperModel: WhisperModel = .defaultModel
+    @State private var regenerationSummaryModel: SummaryModel?
+    @State private var regenerationPrompt: String = ""
+    @State private var transcriptPanelVisible: Bool = false
+    @State private var transcriptSeekTime: TimeInterval?
+    @State private var transcriptSeekRequestID = UUID()
+    @State private var highlightedTranscriptSegmentID: UUID?
     @State private var showDateEditor: Bool = false
     @State private var recordedDraft: Date = Date()
     @State private var isExportingMixedAudio: Bool = false
@@ -52,11 +95,32 @@ struct TranscriptDetailView: View {
     var body: some View {
         if let doc = document {
             contentBody(for: doc)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        titlebarBlock(for: doc)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .primaryAction) {
+                        exportMenu(for: doc)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .primaryAction) {
+                        regenerateControl(for: doc)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .primaryAction) {
+                        transcriptPanelButton()
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
                 .onAppear {
                     titleDraft = doc.title
+                    titleIsEditing = false
+                    titleFieldFocused = false
                     loadAudioIfAvailable(for: doc)
                     useGlossaryThisRun = appState.glossaryTerms.contains(where: \.isEnabled)
                     inferSpeakerNamesThisRun = doc.speakers.contains { Self.hasDefaultRemoteName($0.name) }
+                    prepareRegenerationDefaults(for: doc)
                 }
                 .onDisappear { audioPlayer.unload() }
         } else {
@@ -80,63 +144,103 @@ struct TranscriptDetailView: View {
         }
     }
 
+    private func prepareRegenerationDefaults(for doc: TranscriptDocument) {
+        regenerationWhisperModel = WhisperModel.allCases.first {
+            $0.shortName == doc.modelShortName
+        } ?? appState.selectedModel
+        regenerationSummaryModel = doc.summaryModelOverride
+            ?? appState.defaultSummaryModel(for: doc.language)
+        regenerationPrompt = ""
+    }
+
     @ViewBuilder
     private func contentBody(for doc: TranscriptDocument) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerBlock(for: doc)
-                if audioPlayer.videoURL != nil {
-                    VideoPlayerCard(player: audioPlayer)
-                } else if audioPlayer.url != nil {
-                    AudioPlayerCard(player: audioPlayer)
-                }
-                speakersBlock(for: doc)
-                tagsBlock(for: doc)
-                summaryBlock(for: doc)
-                Divider()
-                transcriptBlock(for: doc)
-            }
-            .padding(32)
-            .frame(maxWidth: 920, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .safeAreaInset(edge: .bottom, alignment: .trailing) {
-            HStack(spacing: 10) {
-                exportButton(for: doc)
-                copyButton(for: doc)
-                if TranscriptStore.shared.audioURL(for: doc) != nil {
-                    mixedAudioExportButton(for: doc)
-                }
-            }
-            .padding(Theme.space12)
-        }
-    }
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                summaryColumn(for: doc)
 
-    // MARK: – Header
-    @ViewBuilder
-    private func headerBlock(for doc: TranscriptDocument) -> some View {
-        HStack(alignment: .top) {
-            headerTextBlock(for: doc)
-            Spacer()
-            VStack(alignment: .trailing, spacing: Theme.space3) {
-                summarizeButton(for: doc)
-                retranscribeButton(for: doc)
+                if transcriptPanelVisible {
+                    Divider()
+                    transcriptPanel(for: doc)
+                        .frame(minWidth: 320, idealWidth: 390, maxWidth: 460)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            if audioPlayer.url != nil {
+                bottomPlayerBar()
             }
         }
+        .background(.background)
+        .animation(entranceAnimation, value: transcriptPanelVisible)
     }
 
     @ViewBuilder
-    private func headerTextBlock(for doc: TranscriptDocument) -> some View {
-        VStack(alignment: .leading, spacing: Theme.space3) {
-            TextField("Title", text: $titleDraft)
-                .font(Theme.titleFont)
-                .tracking(-0.4)
-                .textFieldStyle(.plain)
-                .onSubmit {
-                    appState.renameTranscript(id: documentID, to: titleDraft)
+    private func summaryColumn(for doc: TranscriptDocument) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if audioPlayer.videoURL != nil {
+                        VideoPlayerCard(player: audioPlayer, showsTransport: false)
+                    }
+                    documentDetailsBlock(for: doc)
+                    speakersBlock(for: doc)
+                    tagsBlock(for: doc)
+                    summaryBlock(for: doc)
                 }
+                .padding(.horizontal, 44)
+                .padding(.vertical, 24)
+                .frame(maxWidth: 1020, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
 
-            HStack(spacing: Theme.space4) {
+    private func transcriptPanelButton() -> some View {
+        Button {
+            withAnimation(entranceAnimation) {
+                transcriptPanelVisible.toggle()
+            }
+        } label: {
+            Image(systemName: "sidebar.right")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .accessibilityLabel(transcriptPanelVisible ? "Hide transcript" : "Show transcript")
+        .help(transcriptPanelVisible ? "Hide transcript" : "Show transcript")
+    }
+
+    @ViewBuilder
+    private func titlebarBlock(for doc: TranscriptDocument) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Group {
+                if titleIsEditing {
+                    TextField("Title", text: $titleDraft)
+                        .focused($titleFieldFocused)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .tracking(-0.4)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1)
+                        .onAppear { titleFieldFocused = true }
+                        .onSubmit { finishTitleEditing() }
+                        .onExitCommand { finishTitleEditing() }
+                } else {
+                    Text(titleDraft.isEmpty ? "Title" : titleDraft)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .tracking(-0.4)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.45)
+                        .allowsTightening(true)
+                        .contentShape(Rectangle())
+                        .onTapGesture { titleIsEditing = true }
+                        .accessibilityLabel("Title: \(titleDraft)")
+                }
+            }
+            .frame(minWidth: 220, maxWidth: 640, alignment: .leading)
+            .frame(height: 24)
+
+            HStack(spacing: Theme.space3) {
                 Button {
                     recordedDraft = doc.displayDate
                     showDateEditor = true
@@ -144,6 +248,7 @@ struct TranscriptDetailView: View {
                     Label(dateLabelText(for: doc), systemImage: "calendar")
                 }
                 .buttonStyle(.pressable)
+                .labelStyle(.titleAndIcon)
                 .help(doc.recordedAt != nil
                       ? "Recorded \(doc.displayDate.formatted(date: .abbreviated, time: .omitted)) · transcribed \(doc.date.formatted(date: .abbreviated, time: .shortened)). Click to edit."
                       : "Transcribed \(doc.date.formatted(date: .abbreviated, time: .shortened)). Click to set the recording date.")
@@ -152,11 +257,25 @@ struct TranscriptDetailView: View {
                 }
                 Text("·")
                 Label(formatDuration(doc.duration), systemImage: "clock")
-                Text("·")
-                Text("\(doc.language.flag) \(doc.language.displayName)")
-                Text("·")
-                Text(doc.modelShortName)
-                if let src = doc.sourceURL, !src.isEmpty {
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .frame(minWidth: 220, maxWidth: 640, alignment: .leading)
+    }
+
+    private func finishTitleEditing() {
+        appState.renameTranscript(id: documentID, to: titleDraft)
+        titleFieldFocused = false
+        titleIsEditing = false
+    }
+
+    @ViewBuilder
+    private func documentDetailsBlock(for doc: TranscriptDocument) -> some View {
+        VStack(alignment: .leading, spacing: Theme.space3) {
+            if let src = doc.sourceURL, !src.isEmpty {
+                HStack(spacing: Theme.space3) {
                     Text("·")
                     if doc.sourceKind == .imported {
                         Label(src, systemImage: "tray.and.arrow.down")
@@ -167,9 +286,10 @@ struct TranscriptDetailView: View {
                         }
                     }
                 }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
 
             if doc.hasPartialSystemCapture, let silent = doc.systemAudioSilentFraction {
                 Label {
@@ -184,12 +304,9 @@ struct TranscriptDetailView: View {
         }
     }
 
-    /// Recording date shows date-only (it's day-level); the transcription-date
-    /// fallback keeps its time, which is meaningful.
+    /// Keep both the date and time visible in the titlebar metadata.
     private func dateLabelText(for doc: TranscriptDocument) -> String {
-        doc.recordedAt != nil
-            ? doc.displayDate.formatted(date: .abbreviated, time: .omitted)
-            : doc.displayDate.formatted(date: .abbreviated, time: .shortened)
+        doc.displayDate.formatted(date: .abbreviated, time: .shortened)
     }
 
     @ViewBuilder
@@ -225,17 +342,47 @@ struct TranscriptDetailView: View {
         if !doc.speakers.isEmpty {
             HStack(spacing: Theme.space4) {
                 ForEach(doc.speakers) { sp in
-                    speakerChip(sp)
+                    speakerChip(sp, in: doc)
                 }
                 Spacer()
             }
         }
     }
 
-    private func speakerChip(_ sp: SpeakerLabel) -> some View {
-        Button {
-            renamingSpeakerID = sp.id
-            newSpeakerNameDraft = sp.name
+    private func speakerChip(_ sp: SpeakerLabel, in doc: TranscriptDocument) -> some View {
+        Menu {
+            Button("Rename") {
+                renamingSpeakerID = sp.id
+                newSpeakerNameDraft = sp.name
+            }
+
+            if doc.speakers.count > 1 {
+                Menu("Merge into…") {
+                    ForEach(doc.speakers.filter { $0.id != sp.id }) { target in
+                        Button {
+                            appState.mergeSpeakers(transcriptID: documentID,
+                                                   sourceID: sp.id,
+                                                   into: target.id)
+                        } label: {
+                            HStack(spacing: Theme.space3) {
+                                Circle()
+                                    .fill(speakerTint(for: target.id))
+                                    .frame(width: 8, height: 8)
+                                Text(target.name)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            let segmentCount = doc.segments.filter { $0.speakerId == sp.id }.count
+            Button("Split selected segments…") {
+                splitSpeakerNameDraft = "\(sp.name) 2"
+                selectedSplitSegmentIDs = []
+                splittingSpeakerID = sp.id
+            }
+            .disabled(segmentCount < 2)
         } label: {
             HStack(spacing: Theme.space3) {
                 Circle()
@@ -246,14 +393,22 @@ struct TranscriptDetailView: View {
             .padding(.horizontal, Theme.space6)
             .padding(.vertical, 5)
         }
-        .buttonStyle(.glass)
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.bordered)
         .controlSize(.small)
         .chipHover()
+        .help("Rename, merge, or split this speaker")
         .popover(isPresented: Binding(
             get: { renamingSpeakerID == sp.id },
             set: { if !$0, renamingSpeakerID == sp.id { renamingSpeakerID = nil } }
         )) {
             renamePopover(for: sp)
+        }
+        .popover(isPresented: Binding(
+            get: { splittingSpeakerID == sp.id },
+            set: { if !$0, splittingSpeakerID == sp.id { splittingSpeakerID = nil } }
+        )) {
+            splitPopover(for: sp, in: doc)
         }
     }
 
@@ -281,6 +436,72 @@ struct TranscriptDetailView: View {
         renamingSpeakerID = nil
     }
 
+    @ViewBuilder
+    private func splitPopover(for sp: SpeakerLabel,
+                              in doc: TranscriptDocument) -> some View {
+        let segments = doc.segments.filter { $0.speakerId == sp.id }
+        let canSplit = !splitSpeakerNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !selectedSplitSegmentIDs.isEmpty
+            && selectedSplitSegmentIDs.count < segments.count
+
+        VStack(alignment: .leading, spacing: Theme.space6) {
+            Text("Split \(sp.name)")
+                .font(.headline)
+            Text("Select the segments that belong to another person.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("New speaker name", text: $splitSpeakerNameDraft)
+                .textFieldStyle(.roundedBorder)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.space3) {
+                    ForEach(segments) { segment in
+                        Toggle(isOn: Binding(
+                            get: { selectedSplitSegmentIDs.contains(segment.id) },
+                            set: { selected in
+                                if selected {
+                                    selectedSplitSegmentIDs.insert(segment.id)
+                                } else {
+                                    selectedSplitSegmentIDs.remove(segment.id)
+                                }
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(formatTimestamp(segment.start))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Text(segment.text)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            .frame(width: 360)
+            .frame(maxHeight: 300)
+
+            HStack {
+                Button("Cancel") { splittingSpeakerID = nil }
+                Spacer()
+                Button("Split") { commitSpeakerSplit(id: sp.id) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSplit)
+            }
+        }
+        .padding(16)
+        .frame(width: 400)
+    }
+
+    private func commitSpeakerSplit(id: Int) {
+        appState.splitSpeaker(transcriptID: documentID,
+                              speakerID: id,
+                              segmentIDs: selectedSplitSegmentIDs,
+                              newName: splitSpeakerNameDraft)
+        selectedSplitSegmentIDs = []
+        splittingSpeakerID = nil
+    }
+
     // MARK: – Tags
     @ViewBuilder
     private func tagsBlock(for doc: TranscriptDocument) -> some View {
@@ -299,7 +520,7 @@ struct TranscriptDetailView: View {
                     .padding(.horizontal, Theme.space3)
                     .padding(.vertical, 5)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.bordered)
             .controlSize(.small)
             .chipHover()
             .help("Add tag")
@@ -327,7 +548,7 @@ struct TranscriptDetailView: View {
             .padding(.horizontal, Theme.space6)
             .padding(.vertical, 5)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.bordered)
         .controlSize(.small)
         .chipHover()
         .help("Remove \(tagName)")
@@ -449,7 +670,7 @@ struct TranscriptDetailView: View {
         appState.setTags(currentTags.filter { TagStore.key(for: $0) != key }, for: documentID)
     }
 
-    // MARK: – Summarize button
+    // MARK: – Regenerate
 
     private var isSummarizingThis: Bool {
         appState.summarizingTranscriptID == documentID && appState.summarizationStage.isActive
@@ -463,192 +684,41 @@ struct TranscriptDetailView: View {
     }
 
     @ViewBuilder
-    private func summarizeButton(for doc: TranscriptDocument) -> some View {
-        let hasSummary = (doc.summary?.isEmpty == false)
+    private func regenerateControl(for doc: TranscriptDocument) -> some View {
         if isSummarizingThis {
             Button(role: .destructive) {
                 appState.cancelSummarization()
             } label: {
                 Label("Cancel", systemImage: "stop.circle")
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.bordered)
             .controlSize(.large)
+        } else if let job = activeRetranscribeJob {
+            HStack(spacing: Theme.space3) {
+                ProgressView().controlSize(.small)
+                Text(retranscribeProgressLabel(for: job))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         } else {
-            VStack(alignment: .trailing, spacing: Theme.space3) {
-                HStack(spacing: Theme.space4) {
-                    Button {
-                        appState.summarize(transcriptID: documentID,
-                                           useGlossary: useGlossaryThisRun,
-                                           inferSpeakerNames: inferSpeakerNamesThisRun)
-                    } label: {
-                        Label(hasSummary ? "Regenerate" : "Summarize",
-                              systemImage: "sparkles")
-                    }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
-                    .help("Generate a summary with the model chosen below")
-
-                    Button {
-                        showingCustomPromptPopover = true
-                    } label: {
-                        Image(systemName: "text.bubble")
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
-                    .help("Summarize with a one-off custom prompt")
-                    .popover(isPresented: $showingCustomPromptPopover, arrowEdge: .top) {
-                        customPromptPopover()
-                    }
-                }
-                summaryOptionsRow(for: doc)
+            Button {
+                prepareRegenerationDefaults(for: doc)
+                showingRegeneratePopover = true
+            } label: {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .frame(width: 36, height: 36)
+            .background(Color.accentColor, in: Circle())
+            .contentShape(Circle())
+            .accessibilityLabel(doc.summary?.isEmpty == false ? "Regenerate" : "Generate")
+            .help("Choose local transcription and summary models, then run again")
+            .popover(isPresented: $showingRegeneratePopover, arrowEdge: .top) {
+                regeneratePopover(for: doc)
             }
         }
-    }
-
-    /// Three peer chips beneath the Summarize button — model, glossary,
-    /// identify-speakers. Same caption styling for visual unity; on/off toggles
-    /// signal state via filled vs outline SF Symbols.
-    @ViewBuilder
-    private func summaryOptionsRow(for doc: TranscriptDocument) -> some View {
-        HStack(spacing: 14) {
-            summaryModelMenu(for: doc)
-            glossaryChip()
-            identifyChip(for: doc)
-        }
-    }
-
-    /// Per-meeting LLM picker: local MLX models, then the Azure deployments
-    /// from Settings. Defaults to the Settings model for the transcript's
-    /// language; selecting a non-default model persists the choice on the
-    /// document. Every pass of the run (speakers, summary, title) uses it.
-    @ViewBuilder
-    private func summaryModelMenu(for doc: TranscriptDocument) -> some View {
-        let langDefault = appState.defaultSummaryModel(for: doc.language)
-        let effective = doc.summaryModelOverride ?? langDefault
-        let isAzure = if case .azure = effective { true } else { false }
-
-        Menu {
-            // Per-meeting override is explicit user intent — list every model.
-            // The Settings defaults are still filtered by supportedLanguages.
-            Section("On this Mac") {
-                ForEach(LanguageModel.allCases) { m in
-                    summaryModelButton(.local(m), effective: effective, langDefault: langDefault) {
-                        if !appState.downloadedModelIDs.contains(m.repoID) {
-                            Text("· downloads on first use")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            Section("Azure OpenAI") {
-                ForEach(appState.azureDeployments) { d in
-                    summaryModelButton(.azure(d.id), effective: effective, langDefault: langDefault) {
-                        EmptyView()
-                    }
-                }
-                SettingsLink {
-                    Text(appState.azureDeployments.isEmpty
-                         ? "Add Azure Deployment…"
-                         : "Manage Azure Deployments…")
-                }
-            }
-            if doc.summaryModelOverride != nil {
-                Divider()
-                Button("Reset to Settings default") {
-                    appState.setSummaryModelOverride(nil, for: documentID)
-                }
-            }
-        } label: {
-            Label(appState.shortName(for: effective), systemImage: isAzure ? "cloud" : "cpu")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .chipHover()
-        .help(isAzure
-              ? "Summarizing with an Azure OpenAI deployment — the transcript is sent to your Azure resource. Choose the LLM for the summary and title."
-              : "Choose the LLM used for the summary and title. Defaults to the Settings model for this language.")
-    }
-
-    private func summaryModelButton<Detail: View>(
-        _ model: SummaryModel,
-        effective: SummaryModel,
-        langDefault: SummaryModel,
-        @ViewBuilder detail: () -> Detail
-    ) -> some View {
-        Button {
-            appState.setSummaryModelOverride(model == langDefault ? nil : model, for: documentID)
-        } label: {
-            HStack {
-                if model == effective {
-                    Image(systemName: "checkmark")
-                }
-                Text(appState.displayName(for: model))
-                detail()
-            }
-        }
-    }
-
-    /// Per-summary opt-in for the glossary appendix. Hidden when no glossary
-    /// entries are enabled — nothing to toggle.
-    @ViewBuilder
-    private func glossaryChip() -> some View {
-        if appState.glossaryTerms.contains(where: \.isEnabled) {
-            optionChip(
-                title: "Glossary",
-                isOn: useGlossaryThisRun,
-                onSymbol: "book.closed.fill",
-                offSymbol: "book.closed",
-                help: useGlossaryThisRun
-                    ? "Disable the glossary for this run."
-                    : "Inject the Settings glossary so the LLM understands domain terms."
-            ) {
-                useGlossaryThisRun.toggle()
-            }
-        }
-    }
-
-    /// Per-summary opt-in for the speaker-identification LLM pass. Hidden when
-    /// every speaker already has a non-default name (user-edited, or already
-    /// inferred from a previous summarization).
-    @ViewBuilder
-    private func identifyChip(for doc: TranscriptDocument) -> some View {
-        if doc.speakers.contains(where: { Self.hasDefaultRemoteName($0.name) }) {
-            optionChip(
-                title: "Identify",
-                isOn: inferSpeakerNamesThisRun,
-                onSymbol: "person.text.rectangle.fill",
-                offSymbol: "person.text.rectangle",
-                help: inferSpeakerNamesThisRun
-                    ? "Skip the speaker-identification pass for this run."
-                    : "Run a quick LLM pass to infer names of placeholder \"Remote\" speakers."
-            ) {
-                inferSpeakerNamesThisRun.toggle()
-            }
-        }
-    }
-
-    /// Common visual treatment for the two boolean chips. Mirrors the model
-    /// chip (caption font, secondary tint, leading SF Symbol). Active state
-    /// uses the filled symbol variant and a slightly stronger tint.
-    private func optionChip(
-        title: String,
-        isOn: Bool,
-        onSymbol: String,
-        offSymbol: String,
-        help: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: isOn ? onSymbol : offSymbol)
-                .font(.caption)
-                .foregroundStyle(isOn ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-        }
-        .buttonStyle(.pressable)
-        .fixedSize()
-        .chipHover()
-        .help(help)
     }
 
     /// True for the generator-assigned defaults `"Remote"` and `"Remote N"`.
@@ -667,37 +737,6 @@ struct TranscriptDetailView: View {
         appState.processingJobs.first(where: { $0.replacingDocumentID == documentID })
     }
 
-    /// Every model except the one this transcript was made with — re-running
-    /// with the same model would just reproduce the result.
-    private func retranscribeTargets(for doc: TranscriptDocument) -> [WhisperModel] {
-        WhisperModel.allCases.filter { $0.shortName != doc.modelShortName }
-    }
-
-    @ViewBuilder
-    private func retranscribeButton(for doc: TranscriptDocument) -> some View {
-        if let job = activeRetranscribeJob {
-            HStack(spacing: Theme.space3) {
-                ProgressView().controlSize(.small)
-                Text(retranscribeProgressLabel(for: job))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } else if TranscriptStore.shared.audioURL(for: doc) != nil {
-            Menu {
-                ForEach(retranscribeTargets(for: doc)) { target in
-                    Button("with \(target.displayName)") {
-                        appState.retranscribe(documentID: documentID, with: target)
-                    }
-                }
-            } label: {
-                Label("Re-transcribe", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .buttonStyle(.glass)
-            .controlSize(.small)
-            .help("Run transcription again with a different model. Replaces segments and speakers; clears the summary.")
-        }
-    }
-
     private func retranscribeProgressLabel(for job: AppState.ProcessingJob) -> String {
         switch job.stage {
         case .queued:                         return "Queued for re-transcription"
@@ -706,48 +745,141 @@ struct TranscriptDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private func customPromptPopover() -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Custom summary prompt")
+    private func regeneratePopover(for doc: TranscriptDocument) -> some View {
+        VStack(alignment: .leading, spacing: Theme.space6) {
+            Text("Regenerate")
                 .font(.headline)
-            Text("Replaces only the summary instruction for this run. Title and the Settings system prompt still apply as usual.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
-            TextEditor(text: $customSummaryPrompt)
-                .font(.body)
-                .frame(width: 420, height: 140)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radiusSmall)
-                        .stroke(Color.primary.opacity(0.15))
-                )
-
-            HStack {
-                Button("Load default") {
-                    if let doc = document {
-                        customSummaryPrompt = SummaryPrompts.summaryInstruction(for: doc.language)
+            VStack(alignment: .leading, spacing: Theme.space3) {
+                Picker("Transcription model", selection: $regenerationWhisperModel) {
+                    ForEach(WhisperModel.allCases) { model in
+                        Text(model.displayName).tag(model)
                     }
                 }
-                .controlSize(.small)
-                Spacer()
-                Button("Cancel") { showingCustomPromptPopover = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Summarize") {
-                    showingCustomPromptPopover = false
-                    appState.summarize(
-                        transcriptID: documentID,
-                        customSummaryInstruction: customSummaryPrompt,
-                        useGlossary: useGlossaryThisRun,
-                        inferSpeakerNames: inferSpeakerNamesThisRun
-                    )
+                Picker("Summary model", selection: summaryModelBinding(for: doc)) {
+                    ForEach(summaryModels(for: doc), id: \.self) { model in
+                        Text(appState.displayName(for: model)).tag(model)
+                    }
                 }
+            }
+            .pickerStyle(.menu)
+
+            VStack(alignment: .leading, spacing: Theme.space3) {
+                HStack {
+                    Text("Prompt")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button("Load default") {
+                        regenerationPrompt = SummaryPrompts.summaryInstruction(for: doc.language)
+                    }
+                    .buttonStyle(.link)
+                    Button("Clear") {
+                        regenerationPrompt = ""
+                    }
+                    .buttonStyle(.link)
+                }
+
+                ZStack(alignment: .topLeading) {
+                    if regenerationPrompt.isEmpty {
+                        Text("Optional: replace the summary instruction for this run")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 8)
+                    }
+                    TextEditor(text: $regenerationPrompt)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(2)
+                }
+                .frame(height: 116)
+                .background(Theme.panelFill, in: RoundedRectangle(cornerRadius: Theme.radiusSmall,
+                                                                   style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous)
+                        .stroke(Theme.panelBorder, lineWidth: 0.7)
+                }
+            }
+
+            if appState.glossaryTerms.contains(where: \.isEnabled) {
+                Toggle("Use glossary", isOn: $useGlossaryThisRun)
+            }
+            if doc.speakers.contains(where: { Self.hasDefaultRemoteName($0.name) }) {
+                Toggle("Identify speakers", isOn: $inferSpeakerNamesThisRun)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    showingRegeneratePopover = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Button(doc.summary?.isEmpty == false ? "Regenerate" : "Generate") {
+                    runRegeneration(for: doc)
+                }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(customSummaryPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(18)
+        .frame(width: 430)
+    }
+
+    private func summaryModels(for doc: TranscriptDocument) -> [SummaryModel] {
+        var models: [SummaryModel] = LanguageModel.allCases
+            .filter { $0.supportedLanguages.contains(doc.language) }
+            .map { SummaryModel.local($0) }
+        models += appState.customSummaryModels.map(SummaryModel.custom)
+
+        let selected = regenerationSummaryModel
+            ?? doc.summaryModelOverride
+            ?? appState.defaultSummaryModel(for: doc.language)
+        if !models.contains(selected) {
+            models.append(selected)
+        }
+        return models
+    }
+
+    private func summaryModelBinding(for doc: TranscriptDocument) -> Binding<SummaryModel> {
+        Binding(
+            get: {
+                regenerationSummaryModel
+                    ?? doc.summaryModelOverride
+                    ?? appState.defaultSummaryModel(for: doc.language)
+            },
+            set: { regenerationSummaryModel = $0 }
+        )
+    }
+
+    private func runRegeneration(for doc: TranscriptDocument) {
+        let model = regenerationSummaryModel
+            ?? doc.summaryModelOverride
+            ?? appState.defaultSummaryModel(for: doc.language)
+        let defaultModel = appState.defaultSummaryModel(for: doc.language)
+        appState.setSummaryModelOverride(model == defaultModel ? nil : model, for: documentID)
+
+        let prompt = regenerationPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        showingRegeneratePopover = false
+
+        if regenerationWhisperModel.shortName != doc.modelShortName,
+           TranscriptStore.shared.audioURL(for: doc) != nil {
+            appState.retranscribe(
+                documentID: documentID,
+                with: regenerationWhisperModel,
+                summaryModel: model,
+                customSummaryInstruction: prompt.isEmpty ? nil : prompt,
+                useGlossary: useGlossaryThisRun,
+                inferSpeakerNames: inferSpeakerNamesThisRun
+            )
+        } else {
+            appState.summarize(
+                transcriptID: documentID,
+                customSummaryInstruction: prompt.isEmpty ? nil : prompt,
+                model: model,
+                useGlossary: useGlossaryThisRun,
+                inferSpeakerNames: inferSpeakerNamesThisRun
+            )
+        }
     }
 
     // MARK: – Summary block (streaming + saved)
@@ -795,6 +927,15 @@ struct TranscriptDetailView: View {
                         Text("Reading transcript…").foregroundStyle(.secondary)
                     }
 
+                case .polishingTranscript:
+                    Label("Polishing transcript…", systemImage: "text.badge.checkmark")
+                        .font(.headline)
+                    HStack(spacing: Theme.space4) {
+                        ProgressView().controlSize(.small)
+                        Text("Correcting obvious recognition errors…")
+                            .foregroundStyle(.secondary)
+                    }
+
                 case .generatingSummary(let text):
                     Label("Summary", systemImage: "sparkles")
                         .font(Theme.sectionTitleFont)
@@ -831,37 +972,74 @@ struct TranscriptDetailView: View {
 
     @ViewBuilder
     private func savedSummaryBlock(for doc: TranscriptDocument) -> some View {
-        GlassCard(padding: 18) {
-            VStack(alignment: .leading, spacing: Theme.space6) {
-                HStack {
-                    if doc.summary?.isEmpty == false {
-                        Label("Summary", systemImage: "sparkles")
-                            .font(Theme.sectionTitleFont)
-                    }
-                    Spacer()
-                    Button {
-                        copySummaryMarkdown(doc)
-                    } label: {
-                        Label(summaryJustCopied ? "Copied!" : "Copy summary",
-                              systemImage: summaryJustCopied ? "checkmark.circle.fill" : "doc.on.doc")
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .sensoryFeedback(.success, trigger: summaryJustCopied) { _, new in new }
-                    .help("Copy summary as Markdown")
-                }
+        VStack(alignment: .leading, spacing: 22) {
+            Label("Summary", systemImage: "sparkles")
+                .font(Theme.sectionTitleFont)
 
-                if let summary = doc.summary, !summary.isEmpty {
-                    Text(markdown: summary).textSelection(.enabled)
-                }
-                if let model = doc.summaryModelShortName,
-                   let when = doc.summaryGeneratedAt {
-                    Text("\(model) · \(when.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+            if let summary = doc.summary, !summary.isEmpty {
+                summaryContent(summary, for: doc)
+                    .textSelection(.enabled)
+            }
+
+            if let model = doc.summaryModelShortName,
+               let when = doc.summaryGeneratedAt {
+                Text("\(model) · \(when.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    @ViewBuilder
+    private func summaryContent(_ summary: String, for doc: TranscriptDocument) -> some View {
+        if let markup = SummaryMarkup.parse(summary, duration: doc.duration) {
+            VStack(alignment: .leading, spacing: 28) {
+                ForEach(markup.sections) { section in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(section.title)
+                            .font(.system(size: 23, weight: .semibold, design: .rounded))
+
+                        if !section.body.isEmpty {
+                            Text(markdown: section.body)
+                                .font(.body)
+                        }
+
+                        if !section.bullets.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(section.bullets) { bullet in
+                                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                        Text("•")
+                                            .foregroundStyle(.secondary)
+                                        Text(markdown: bullet.text)
+                                        if let timestamp = bullet.timestamp {
+                                            summaryTimestampButton(timestamp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            Text(markdown: summary)
+        }
+    }
+
+    private func summaryTimestampButton(_ timestamp: TimeInterval) -> some View {
+        Button {
+            seekTo(timestamp, openTranscript: true)
+        } label: {
+            Text(formatTimestamp(timestamp))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(Theme.subtle)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .help("Open transcript at \(formatTimestamp(timestamp))")
     }
 
     private func copySummaryMarkdown(_ doc: TranscriptDocument) {
@@ -869,11 +1047,6 @@ struct TranscriptDetailView: View {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(md, forType: .string)
-        withAnimation(.snappy) { summaryJustCopied = true }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1400))
-            withAnimation(.snappy) { summaryJustCopied = false }
-        }
     }
 
     @ViewBuilder
@@ -902,56 +1075,68 @@ struct TranscriptDetailView: View {
 
     // MARK: – Transcript
     @ViewBuilder
-    private func transcriptBlock(for doc: TranscriptDocument) -> some View {
-        VStack(alignment: .leading, spacing: Theme.space4) {
-            Button {
-                withAnimation(entranceAnimation) {
-                    transcriptExpanded.toggle()
+    private func transcriptPanel(for doc: TranscriptDocument) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Transcript")
+                    .font(Theme.sectionTitleFont)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                let blockCount = transcriptBlocks(for: doc).count
+                Text("\(blockCount) block\(blockCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    withAnimation(entranceAnimation) {
+                        transcriptPanelVisible = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
                 }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14)
-                        .rotationEffect(.degrees(transcriptExpanded ? 90 : 0))
-                        .animation(.snappy(duration: 0.18), value: transcriptExpanded)
-                    Text("Transcript").font(Theme.sectionTitleFont)
-                    Text("·").foregroundStyle(.tertiary)
-                    Text("\(doc.segments.count) segment\(doc.segments.count == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                // Pad first, then set content shape so the hit area covers the
-                // padding — the old 13 pt strip was the root of the "click the
-                // chevron precisely" complaint.
-                .padding(.vertical, 10)
-                .contentShape(.rect)
+                .buttonStyle(.pressable)
+                .help("Hide transcript")
             }
-            .buttonStyle(.pressable)
-            .accessibilityLabel(transcriptExpanded ? "Hide transcript" : "Show transcript")
-            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
 
-            if transcriptExpanded {
-                transcriptSegments(for: doc)
-                    .transition(bottomRevealTransition)
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    transcriptSegments(for: doc)
+                        .padding(20)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onAppear {
+                    if let time = transcriptSeekTime {
+                        revealTranscriptSegment(to: time, in: doc, using: proxy)
+                    }
+                }
+                .onChange(of: transcriptSeekRequestID) { _, _ in
+                    guard let time = transcriptSeekTime else { return }
+                    revealTranscriptSegment(to: time, in: doc, using: proxy)
+                }
             }
+        }
+        .frame(maxHeight: .infinity)
+        .background(Theme.panelFill)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Theme.panelBorder)
+                .frame(width: 0.7)
         }
     }
 
     @ViewBuilder
     private func transcriptSegments(for doc: TranscriptDocument) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(doc.segments) { seg in
+            ForEach(transcriptBlocks(for: doc)) { block in
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     Button {
-                        if audioPlayer.url != nil {
-                            audioPlayer.seek(to: seg.start)
-                            if !audioPlayer.isPlaying { audioPlayer.togglePlay() }
-                        }
+                        seekTo(block.start, openTranscript: false)
                     } label: {
-                        Text(formatTimestamp(seg.start))
+                        Text(formatTimestamp(block.start))
                             .font(Theme.monoFont)
                             .monospacedDigit()
                             .foregroundStyle(audioPlayer.url != nil
@@ -964,31 +1149,190 @@ struct TranscriptDetailView: View {
                     .help(audioPlayer.url != nil ? "Play from here" : "")
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(speakerName(for: seg.speakerId, in: doc))
+                        Text(speakerName(for: block.speakerId, in: doc))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(speakerTint(for: seg.speakerId))
-                        Text(seg.text)
+                            .foregroundStyle(speakerTint(for: block.speakerId))
+                        Text(block.text)
                             .textSelection(.enabled)
                     }
                 }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    transcriptBlockIsHighlighted(block)
+                        ? Theme.accent.opacity(0.12)
+                        : .clear,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusSmall,
+                                         style: .continuous)
+                )
+                .id(block.id)
             }
         }
     }
 
-    // MARK: – Copy button (floating)
-    private func copyButton(for doc: TranscriptDocument) -> some View {
-        Button {
-            copyMarkdown(doc)
-        } label: {
-            Label(justCopied ? "Copied!" : "Copy as Markdown",
-                  systemImage: justCopied ? "checkmark.circle.fill" : "doc.on.doc.fill")
-                .padding(.horizontal, Theme.space4)
+    private func transcriptBlocks(for doc: TranscriptDocument) -> [TranscriptBlock] {
+        guard let first = doc.segments.first else { return [] }
+
+        var grouped: [[TranscriptSegment]] = []
+        var current = [first]
+
+        for segment in doc.segments.dropFirst() {
+            guard let previous = current.last else { continue }
+
+            let gap = segment.start - previous.end
+            let currentLength = current.reduce(0) { $0 + $1.text.count }
+            let isNewSpeaker = segment.speakerId != previous.speakerId
+            // Whisper often leaves a 3–6 second gap inside one sentence.
+            // Prefer coherent same-speaker thoughts over acoustic chunks.
+            let hasMeaningfulPause = gap > 8
+            let completedThought = currentLength >= 48
+                && textEndsThought(previous.text)
+                && gap > 1.25
+            let reachedSoftLimit = current.count >= 16
+                || currentLength + segment.text.count > 420
+                || segment.start - current[0].start > 45
+
+            if isNewSpeaker || hasMeaningfulPause || completedThought || reachedSoftLimit {
+                grouped.append(current)
+                current = [segment]
+            } else {
+                current.append(segment)
+            }
         }
-        .buttonStyle(.glassProminent)
+        grouped.append(current)
+
+        return grouped.map(TranscriptBlock.init(segments:))
+    }
+
+    private func textEndsThought(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
+            return false
+        }
+        return ".!?…".contains(last)
+    }
+
+    private func transcriptBlockIsHighlighted(_ block: TranscriptBlock) -> Bool {
+        guard let highlightedTranscriptSegmentID else { return false }
+        return block.segments.contains { $0.id == highlightedTranscriptSegmentID }
+    }
+
+    private func nearestSegment(
+        to timestamp: TimeInterval,
+        in doc: TranscriptDocument
+    ) -> TranscriptSegment? {
+        doc.segments.min { lhs, rhs in
+            abs(lhs.start - timestamp) < abs(rhs.start - timestamp)
+        }
+    }
+
+    private func revealTranscriptSegment(
+        to timestamp: TimeInterval,
+        in doc: TranscriptDocument,
+        using proxy: ScrollViewProxy
+    ) {
+        guard let segment = nearestSegment(to: timestamp, in: doc) else { return }
+        guard let block = transcriptBlocks(for: doc).first(where: {
+            $0.segments.contains { $0.id == segment.id }
+        }) else { return }
+        withAnimation(entranceAnimation) {
+            proxy.scrollTo(block.id, anchor: .center)
+        }
+        highlightedTranscriptSegmentID = segment.id
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1300))
+            if highlightedTranscriptSegmentID == segment.id {
+                highlightedTranscriptSegmentID = nil
+            }
+        }
+    }
+
+    private func seekTo(_ timestamp: TimeInterval, openTranscript: Bool) {
+        if audioPlayer.url != nil {
+            audioPlayer.seek(to: timestamp)
+            if !audioPlayer.isPlaying {
+                audioPlayer.togglePlay()
+            }
+        }
+        if openTranscript {
+            withAnimation(entranceAnimation) {
+                transcriptPanelVisible = true
+            }
+        }
+        transcriptSeekTime = timestamp
+        transcriptSeekRequestID = UUID()
+    }
+
+    @ViewBuilder
+    private func bottomPlayerBar() -> some View {
+        PlayerTransportRow(player: audioPlayer)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Theme.panelFill)
+            .overlay(alignment: .top) {
+                Divider()
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Audio player")
+    }
+
+    private func exportMenu(for doc: TranscriptDocument) -> some View {
+        Menu {
+            Button {
+                exportMarkdown(doc)
+            } label: {
+                Label("Save transcript as Markdown…", systemImage: "square.and.arrow.down")
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+
+            Button {
+                copyMarkdown(doc)
+            } label: {
+                Label(justCopied ? "Copied transcript Markdown" : "Copy transcript Markdown",
+                      systemImage: justCopied ? "checkmark.circle.fill" : "doc.on.doc")
+            }
+            .tint(justCopied ? .green : nil)
+            .sensoryFeedback(.success, trigger: justCopied) { _, new in new }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+
+            if doc.summary?.isEmpty == false {
+                Button {
+                    copySummaryMarkdown(doc)
+                } label: {
+                    Label("Copy summary Markdown", systemImage: "sparkles")
+                }
+            }
+
+            if TranscriptStore.shared.audioURL(for: doc) != nil {
+                Divider()
+                Button {
+                    exportMixedAudio(doc)
+                } label: {
+                    Label(
+                        isExportingMixedAudio
+                            ? "Preparing MP3…"
+                            : mixedAudioWasSaved
+                                ? "MP3 saved to Downloads"
+                                : "Download mixed MP3",
+                        systemImage: isExportingMixedAudio
+                            ? "hourglass"
+                            : mixedAudioWasSaved
+                                ? "checkmark.circle.fill"
+                                : "waveform.badge.arrow.down"
+                    )
+                }
+                .disabled(isExportingMixedAudio)
+                .sensoryFeedback(.success, trigger: mixedAudioWasSaved) { _, new in new }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
+        }
+        .buttonStyle(.bordered)
         .controlSize(.large)
-        .tint(justCopied ? .green : Theme.accent)
-        .sensoryFeedback(.success, trigger: justCopied) { _, new in new }
-        .keyboardShortcut("c", modifiers: [.command, .shift])
+        .labelStyle(.titleAndIcon)
+        .frame(minWidth: 112)
+        .help("Export transcript or audio")
     }
 
     private func copyMarkdown(_ doc: TranscriptDocument) {
@@ -1001,20 +1345,6 @@ struct TranscriptDetailView: View {
             try? await Task.sleep(for: .milliseconds(1600))
             withAnimation(.snappy) { justCopied = false }
         }
-    }
-
-    // MARK: – Export button (save .md to disk)
-    private func exportButton(for doc: TranscriptDocument) -> some View {
-        Button {
-            exportMarkdown(doc)
-        } label: {
-            Label("Save as .md…", systemImage: "square.and.arrow.down.fill")
-                .padding(.horizontal, Theme.space4)
-        }
-        .buttonStyle(.glassProminent)
-        .controlSize(.large)
-        .tint(Theme.accent)
-        .keyboardShortcut("e", modifiers: [.command, .shift])
     }
 
     private func exportMarkdown(_ doc: TranscriptDocument) {
@@ -1030,45 +1360,6 @@ struct TranscriptDetailView: View {
         } catch {
             appState.lastError = "Could not save Markdown: \(error.localizedDescription)"
         }
-    }
-
-    // MARK: – Mixed audio export (save directly to Downloads)
-    private func mixedAudioExportButton(for doc: TranscriptDocument) -> some View {
-        Button {
-            exportMixedAudio(doc)
-        } label: {
-            Group {
-                if isExportingMixedAudio {
-                    HStack(spacing: Theme.space3) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Creating MP3…")
-                    }
-                } else {
-                    Label(
-                        mixedAudioWasSaved ? "Saved to Downloads" : "Download mixed MP3",
-                        systemImage: mixedAudioWasSaved
-                            ? "checkmark.circle.fill"
-                            : "waveform.badge.arrow.down"
-                    )
-                }
-            }
-            .padding(.horizontal, Theme.space4)
-        }
-        .buttonStyle(.glassProminent)
-        .controlSize(.large)
-        .tint(mixedAudioWasSaved ? .green : Theme.accent)
-        .disabled(isExportingMixedAudio)
-        .sensoryFeedback(.success, trigger: mixedAudioWasSaved) { _, new in new }
-        .keyboardShortcut("m", modifiers: [.command, .shift])
-        .help("Mix the microphone and system-audio recordings into one compressed MP3 in Downloads")
-        .accessibilityLabel(
-            isExportingMixedAudio
-                ? "Creating mixed MP3"
-                : mixedAudioWasSaved
-                    ? "Mixed MP3 saved to Downloads"
-                    : "Download mixed MP3"
-        )
     }
 
     private func exportMixedAudio(_ doc: TranscriptDocument) {

@@ -47,7 +47,7 @@ if [[ $UNSIGNED == false ]]; then
     }
     xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --output-format json >/dev/null
 fi
-NAME="Simple-Meeting-Scribe-$VERSION-arm64"
+NAME="MeetX-$VERSION-arm64"
 [[ $UNSIGNED == false ]] || NAME="$NAME-UNSIGNED"
 OUTPUT="$REPO_ROOT/dist/$NAME-build$BUILD_NUMBER"
 [[ ! -e $OUTPUT ]] || { echo "Output already exists: $OUTPUT" >&2; exit 1; }
@@ -86,8 +86,8 @@ if ! xcodebuild -project MeetingTranscriber.xcodeproj -scheme MeetingTranscriber
     exit 1
 fi
 scripts/build-lame.sh "$WORK/lame"
-APP="$WORK/image/MeetingTranscriber.app"
-ditto "$WORK/DerivedData/Build/Products/Release/MeetingTranscriber.app" "$APP"
+APP="$WORK/image/MeetX.app"
+ditto "$WORK/DerivedData/Build/Products/Release/MeetX.app" "$APP"
 python3 scripts/release/bundle.py prepare "$APP" "$PACKAGES" "$WORK/lame"
 python3 scripts/release/bundle.py verify "$APP"
 scripts/test-audio-export.sh "$APP/Contents/Helpers/lame" > "$WORK/audio-export-tests.log" 2>&1 || {
@@ -113,13 +113,14 @@ if [[ $UNSIGNED == false ]]; then
 fi
 ln -s /Applications "$WORK/image/Applications"
 cat > "$WORK/image/Read Me.txt" <<'README'
-Simple Meeting Scribe — Apple Silicon, macOS 26 or later
+MeetX — Apple Silicon, macOS 26 or later
 
-Drag MeetingTranscriber into Applications, then open it from Applications.
+Drag MeetX into Applications, then open it from Applications.
 Allow microphone, screen/system audio recording, and browser Automation when prompted.
 Local speech/summary models download on first use and need internet and free disk space.
 MP3 export includes its encoder. Xcode and Homebrew are not needed.
-Optional Azure features require your own configuration and credentials.
+All transcription and summarization are local. A custom summarization server,
+if configured, must run on this Mac.
 
 Source, documentation and releases:
 https://github.com/czlonkowski/simple-meeting-scribe
@@ -128,7 +129,7 @@ Third-party licenses and the complete LAME source are inside the app:
 Show Package Contents → Contents/Resources/ThirdParty
 README
 DMG="$WORK/artifacts/$NAME.dmg"
-hdiutil create -volname "Simple Meeting Scribe $VERSION" -srcfolder "$WORK/image" \
+hdiutil create -volname "MeetX $VERSION" -srcfolder "$WORK/image" \
     -format UDZO -fs HFS+ "$DMG"
 if [[ $UNSIGNED == false ]]; then
     codesign --sign "$SIGNING_IDENTITY" --timestamp "$DMG"
@@ -141,13 +142,13 @@ MOUNT="$WORK/mounted"
 mkdir "$MOUNT"
 hdiutil attach "$DMG" -readonly -nobrowse -noautoopen -mountpoint "$MOUNT" >/dev/null
 if [[ $UNSIGNED == true ]]; then
-    python3 scripts/release/bundle.py verify "$MOUNT/MeetingTranscriber.app"
+    python3 scripts/release/bundle.py verify "$MOUNT/MeetX.app"
 else
-    python3 scripts/release/bundle.py verify "$MOUNT/MeetingTranscriber.app" --signed
+    python3 scripts/release/bundle.py verify "$MOUNT/MeetX.app" --signed
 fi
 if [[ $UNSIGNED == false ]]; then
-    xcrun stapler validate "$MOUNT/MeetingTranscriber.app"
-    spctl --assess --type execute --verbose=2 "$MOUNT/MeetingTranscriber.app"
+    xcrun stapler validate "$MOUNT/MeetX.app"
+    spctl --assess --type execute --verbose=2 "$MOUNT/MeetX.app"
 fi
 hdiutil detach "$MOUNT" >/dev/null
 MOUNT=""

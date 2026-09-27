@@ -14,13 +14,8 @@ enum TranscriptionLanguage: String, CaseIterable, Codable, Identifiable, Hashabl
         case .russian: return "Русский"
         }
     }
-    var flag: String {
-        switch self {
-        case .english: return "🇬🇧"
-        case .polish:  return "🇵🇱"
-        case .russian: return "🇷🇺"
-        }
-    }
+    /// Compact language tag used throughout the UI instead of country flags.
+    var tag: String { rawValue.uppercased() }
 }
 
 enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
@@ -34,14 +29,8 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
     case parakeetV3   = "parakeet-tdt-0.6b-v3"
     // Native Swift/MLX runtime for GigaAM-v3 end-to-end RNNT.
     case gigaamV3RNNT = "gigaam-v3-e2e-rnnt"
-    // Cloud engines — not WhisperKit folders; must never reach WhisperEngine.
-    case scribeV2     = "elevenlabs-scribe-v2"
-    case maiTranscribe2 = "azure-mai-transcribe-2"
-
-    /// Engine the app starts with. Best Polish accuracy in a 2026-09 comparison
-    /// on real meetings (ahead of Scribe v2 and Whisper large-v3), on par with
-    /// Scribe for English.
-    static let defaultModel: WhisperModel = .maiTranscribe2
+    /// Fast, accurate local default. It is also the preferred model for Russian.
+    static let defaultModel: WhisperModel = .largeV3Turbo
 
     var id: String { rawValue }
     var displayName: String {
@@ -50,8 +39,6 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
         case .largeV3:      return "Whisper Large v3 (best quality, ~626 MB)"
         case .parakeetV3:   return "Parakeet v3 (fastest, Neural Engine, ~600 MB)"
         case .gigaamV3RNNT: return "GigaAM-v3 RNNT (Russian, MLX, ~425 MB)"
-        case .scribeV2:     return "ElevenLabs Scribe v2 (cloud)"
-        case .maiTranscribe2: return "Microsoft MAI-Transcribe-2 (cloud)"
         }
     }
     var shortName: String {
@@ -60,8 +47,6 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
         case .largeV3:      return "large-v3"
         case .parakeetV3:   return "parakeet-v3"
         case .gigaamV3RNNT: return "gigaam-v3-rnnt"
-        case .scribeV2:     return "scribe-v2"
-        case .maiTranscribe2: return "mai-transcribe-2"
         }
     }
     /// One-word label for segmented pickers.
@@ -71,23 +56,17 @@ enum WhisperModel: String, CaseIterable, Codable, Identifiable, Hashable {
         case .largeV3:      return "Large"
         case .parakeetV3:   return "Parakeet"
         case .gigaamV3RNNT: return "GigaAM"
-        case .scribeV2:     return "Scribe"
-        case .maiTranscribe2: return "MAI"
         }
     }
-    /// Cloud models upload one stem mix (`ScribeEngine` / `MAITranscribeEngine`);
-    /// local ones go to `WhisperEngine`.
-    var isCloud: Bool { self == .scribeV2 || self == .maiTranscribe2 }
     /// Local non-Whisper model handled by `ParakeetEngine`.
     var isParakeet: Bool { self == .parakeetV3 }
     var isGigaAM: Bool { self == .gigaamV3RNNT }
 
     var loadingStage: String {
         switch self {
-        case .parakeetV3:     return "Loading Parakeet"
-        case .gigaamV3RNNT:   return "Loading GigaAM"
-        case .scribeV2, .maiTranscribe2: return "Preparing upload"
-        default:              return "Loading Whisper"
+        case .parakeetV3:   "Loading Parakeet"
+        case .gigaamV3RNNT: "Loading GigaAM"
+        default:            "Loading Whisper"
         }
     }
 }
@@ -113,7 +92,7 @@ struct TranscriptSegment: Codable, Identifiable, Hashable, Sendable {
     let start: Double   // seconds
     let end: Double     // seconds
     var speakerId: Int  // 0-based; -1 for unknown
-    let text: String
+    var text: String
 }
 
 struct SpeakerLabel: Codable, Hashable, Identifiable, Sendable {
@@ -230,11 +209,9 @@ struct TranscriptDocument: Codable, Identifiable, Hashable, Sendable {
 
 extension TranscriptDocument {
     /// Custom decoder that tolerates a `summaryModelOverride` referring to a
-    /// model that no longer exists (e.g. a removed Bielik repo ID): it decodes
-    /// to `nil` rather than throwing, so old transcripts still load. An Azure
-    /// override decodes even after its deployment is removed from Settings;
-    /// summarizing then asks for another model. All other
-    /// fields decode exactly as the synthesized initializer would.
+    /// model that no longer exists: it decodes to `nil` rather than throwing,
+    /// so old transcripts still load. All other fields decode exactly as the
+    /// synthesized initializer would.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -258,5 +235,64 @@ extension TranscriptDocument {
         // Lenient: present-but-unknown rawValue throws inside decodeIfPresent,
         // which `try?` turns into nil; absent key also yields nil.
         summaryModelOverride = (try? c.decodeIfPresent(SummaryModel.self, forKey: .summaryModelOverride)) ?? nil
+    }
+}
+
+/// Pure speaker-editing operations used by the detail view and easy to verify
+/// without touching the transcript store.
+enum SpeakerEditing {
+    /// Reassign every segment from `sourceID` to `targetID` and remove the
+    /// source label. The target label and its name are preserved.
+    static func merge(_ document: TranscriptDocument,
+                      sourceID: Int,
+                      into targetID: Int) -> TranscriptDocument? {
+        guard sourceID != targetID,
+              document.speakers.contains(where: { $0.id == sourceID }),
+              document.speakers.contains(where: { $0.id == targetID }) else {
+            return nil
+        }
+
+        var updated = document
+        updated.speakers.removeAll { $0.id == sourceID }
+        updated.segments = updated.segments.map { segment in
+            guard segment.speakerId == sourceID else { return segment }
+            var reassigned = segment
+            reassigned.speakerId = targetID
+            return reassigned
+        }
+        return updated
+    }
+
+    /// Move a selected subset of a speaker's segments to a new speaker label.
+    /// At least one segment must remain under the old label so this operation
+    /// is a split rather than a second way to merge all segments.
+    static func split(_ document: TranscriptDocument,
+                      speakerID: Int,
+                      segmentIDs: Set<UUID>,
+                      newName: String) -> TranscriptDocument? {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceSegments = document.segments.filter { $0.speakerId == speakerID }
+        let selected = Set(sourceSegments.map(\.id)).intersection(segmentIDs)
+        guard document.speakers.contains(where: { $0.id == speakerID }),
+              !name.isEmpty,
+              !selected.isEmpty,
+              selected.count < sourceSegments.count else {
+            return nil
+        }
+
+        let highestID = max(
+            document.speakers.map(\.id).max() ?? -1,
+            document.segments.map(\.speakerId).max() ?? -1
+        )
+        let newID = highestID + 1
+        var updated = document
+        updated.speakers.append(SpeakerLabel(id: newID, name: name))
+        updated.segments = updated.segments.map { segment in
+            guard selected.contains(segment.id) else { return segment }
+            var reassigned = segment
+            reassigned.speakerId = newID
+            return reassigned
+        }
+        return updated
     }
 }

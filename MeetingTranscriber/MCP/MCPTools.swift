@@ -12,7 +12,7 @@ enum MCPTools {
         Tool(
             name: "list_transcripts",
             description: """
-                List transcripts stored by Meeting Transcriber. Returns a JSON \
+                List transcripts stored by MeetX. Returns a JSON \
                 array sorted newest-first, each entry containing id, title, \
                 ISO-8601 date, durationSeconds, language, hasSummary, and tags. \
                 Pass an optional `query` to substring-match the title, and \
@@ -275,7 +275,7 @@ enum MCPTools {
                 fallback: "Failed to encode updated tag list."
             )
         case .appUnavailable:
-            return errorResult("Meeting Transcriber app state is unavailable.")
+            return errorResult("MeetX app state is unavailable.")
         case .unknownID:
             return errorResult("No transcript found for id: \(id)")
         }
